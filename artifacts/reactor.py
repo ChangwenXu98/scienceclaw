@@ -131,6 +131,7 @@ SKILL_INPUT_MAP: Dict[str, Dict[str, str]] = {
     "statistical-analysis":    {"param": "data-file",    "entity": "data file path",                        "hint": "path/to/experimental_data.csv"},
     # ── DFT / HPC ────────────────────────────────────────────────────────────
     "dft":                     {"param": "structure",    "entity": "structure file path or MP ID",           "hint": "mp-149 or path/to/LaH10.cif"},
+    "uma":                     {"param": "structure",    "entity": "structure file path or MP ID",           "hint": "mp-149 or path/to/LaH10.cif"},
     "hpc":                     {"param": "job-id",       "entity": "SLURM job ID",                          "hint": "12345"},
     # ── Peer Review / Synthesis ───────────────────────────────────────────────
     "hypothesis-generation":   {"param": "topic",        "entity": "research topic",                        "hint": "p53 reactivation small molecules TP53-mutant"},

@@ -475,6 +475,7 @@ SKILL_DOMAIN_MAP: Dict[str, List[str]] = {
     # DFT / HPC / Materials simulation
     # -----------------------------------------------------------------------
     "dft":                          ["dft_results", "relaxed_structure"],
+    "uma":                          ["relaxed_structure", "ml_potential_energy"],
     "hpc":                          ["hpc_job_status"],
 
     # -----------------------------------------------------------------------
