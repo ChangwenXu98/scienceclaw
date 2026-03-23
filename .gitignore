@@ -120,3 +120,8 @@ temp/
 # Skill scripts are tracked in git
 !skills/**/scripts/
 !skills/**/scripts/**
+
+# Claude files
+.claude/
+CLAUDE.md
+CONTEXT.md

@@ -129,6 +129,9 @@ SKILL_INPUT_MAP: Dict[str, Dict[str, str]] = {
     "scikit-learn":            {"param": "data",         "entity": "data file path",                        "hint": "path/to/features.csv"},
     "transformers":            {"param": "text",         "entity": "text or model name",                    "hint": "bert-base-uncased or text to classify"},
     "statistical-analysis":    {"param": "data-file",    "entity": "data file path",                        "hint": "path/to/experimental_data.csv"},
+    # ── DFT / HPC ────────────────────────────────────────────────────────────
+    "dft":                     {"param": "structure",    "entity": "structure file path or MP ID",           "hint": "mp-149 or path/to/LaH10.cif"},
+    "hpc":                     {"param": "job-id",       "entity": "SLURM job ID",                          "hint": "12345"},
     # ── Peer Review / Synthesis ───────────────────────────────────────────────
     "hypothesis-generation":   {"param": "topic",        "entity": "research topic",                        "hint": "p53 reactivation small molecules TP53-mutant"},
     "scientific-brainstorming":{"param": "prompt",       "entity": "scientific prompt",                     "hint": "novel approaches to restore TP53 function"},
