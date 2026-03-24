@@ -90,7 +90,8 @@ def atoms_to_cif_string(atoms):
 
 
 def run_relaxation(atoms, model_name, task_name, device, relax_cell,
-                   fmax, max_steps, optimizer_name, output_traj):
+                   fmax, max_steps, optimizer_name, output_traj,
+                   pressure_gpa=0.0):
     """Run structure relaxation and return results dict."""
     from fairchem.core import pretrained_mlip, FAIRChemCalculator
 
@@ -106,9 +107,13 @@ def run_relaxation(atoms, model_name, task_name, device, relax_cell,
     else:
         from ase.optimize import LBFGS as Optimizer
 
+    if pressure_gpa != 0.0:
+        relax_cell = True  # pressure requires cell relaxation
+
     if relax_cell:
         from ase.filters import FrechetCellFilter
-        opt_atoms = FrechetCellFilter(atoms)
+        pressure_ev_per_A3 = pressure_gpa / 160.21766208
+        opt_atoms = FrechetCellFilter(atoms, scalar_pressure=pressure_ev_per_A3)
     else:
         opt_atoms = atoms
 
@@ -150,6 +155,7 @@ def run_relaxation(atoms, model_name, task_name, device, relax_cell,
         "converged": bool(converged),
         "steps_taken": steps_taken,
         "fmax_achieved": round(fmax_achieved, 6),
+        "pressure_GPa": pressure_gpa,
         "cell_relaxed": relax_cell,
         "lattice_a": round(float(lengths[0]), 4),
         "lattice_b": round(float(lengths[1]), 4),
@@ -179,6 +185,9 @@ def main():
     parser.add_argument("--relax-cell", action="store_true",
                         help="Enable full cell relaxation "
                              "(shape + volume + positions)")
+    parser.add_argument("--pressure", type=float, default=0.0,
+                        help="External pressure in GPa (default: 0). "
+                             "Implies --relax-cell.")
     parser.add_argument("--fmax", type=float, default=0.05,
                         help="Force convergence threshold in eV/A "
                              "(default: 0.05)")
@@ -234,6 +243,7 @@ def main():
         max_steps=args.steps,
         optimizer_name=args.optimizer,
         output_traj=args.output_traj,
+        pressure_gpa=args.pressure,
     )
 
     if args.output_cif:
