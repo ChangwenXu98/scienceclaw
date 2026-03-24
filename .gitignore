@@ -125,3 +125,6 @@ temp/
 .claude/
 CLAUDE.md
 CONTEXT.md
+
+# Results
+hydride_screening/*

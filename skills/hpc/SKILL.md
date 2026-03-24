@@ -1,28 +1,28 @@
 ---
 name: hpc
-description: SLURM HPC job management — submit, monitor, and cancel batch jobs on Artemis
+description: SLURM HPC job management on Artemis — write submission scripts, submit jobs, monitor status, retrieve results
 metadata:
 ---
 
 # HPC Skill
 
-General-purpose SLURM job management for the Artemis HPC cluster. Provides job submission, status monitoring, queue inspection, and cancellation. The DFT skill builds on top of this for domain-specific workflows.
+Manage SLURM batch jobs on the Artemis HPC cluster. This skill teaches the agent how to write SLURM submission scripts, submit them, monitor status, and retrieve results using standard SLURM CLI tools.
 
-## Status: IN DEVELOPMENT
+There are no wrapper scripts — use SLURM commands directly via bash.
 
 ## Artemis Cluster Overview
 
-33 nodes total: 25 CPU, 3 large-memory, 3 H100 GPU, 2 A100 GPU. All CPU/largemem/H100 nodes use AMD EPYC 9654 (96 cores, Zen4). A100 nodes use AMD EPYC 7513 (32 cores, Zen3).
+33 nodes total: 25 CPU, 3 large-memory, 3 H100 GPU, 2 A100 GPU.
 
 ### Partitions
 
-| Partition | Wall Time | Nodes | Notes |
-|-----------|-----------|-------|-------|
-| `venkvis-cpu` | 48h | 25 CPU (96c, 368 GB) | Default for DFT |
-| `venkvis-largemem` | 48h | 3 (96c, 768 GB) | Large-memory jobs |
-| `venkvis-a100` | 8h | 2 (4× A100 80GB each) | GPU compute |
-| `venkvis-h100` | 8h | 3 (4× H100 80GB each) | GPU compute |
-| `debug` | 30m | 4 nodes max, 1 job | Quick tests |
+| Partition | Wall Time | Nodes | CPUs | RAM | GPUs | Notes |
+|-----------|-----------|-------|------|-----|------|-------|
+| `venkvis-cpu` | 48h | 25 | 96c (EPYC 9654) | 368 GB | — | Default for DFT |
+| `venkvis-largemem` | 48h | 3 | 96c (EPYC 9654) | 768 GB | — | Large-memory jobs |
+| `venkvis-a100` | 8h | 2 | 32c (EPYC 7513) | 512 GB | 4× A100 80GB | GPU compute |
+| `venkvis-h100` | 8h | 3 | 96c (EPYC 9654) | 368 GB | 4× H100 80GB | GPU compute (fastest) |
+| `debug` | 30m | 4 max | varies | varies | varies | Quick tests |
 
 ### Storage
 
@@ -32,38 +32,117 @@ General-purpose SLURM job management for the Artemis HPC cluster. Provides job s
 | Scratch | `/scratch/venkvis_root/venkvis/` | 10 TB (500 GB fair share) | **60-day auto-purge** |
 | Home | `/home/<user>` | 80 GB | User home |
 | Node Local | `/tmp` | 1.9 TB NVMe | Ephemeral, fast I/O |
-| DataDen | Via Globus | 100 TB | Tape archival |
 
-## Scripts
+## Writing a SLURM Submission Script
 
-### `slurm_status.py` — Check job status or inspect the queue
+Create a bash script with `#SBATCH` directives. Example for a GPU job:
+
 ```bash
-python3 {baseDir}/scripts/slurm_status.py --job-id 12345 --format json
-python3 {baseDir}/scripts/slurm_status.py --queue --partition venkvis-cpu --format json
+#!/bin/bash
+#SBATCH --job-name=my-job
+#SBATCH --partition=venkvis-h100
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=32G
+#SBATCH --time=02:00:00
+#SBATCH --gres=gpu:1
+#SBATCH --output=slurm-%j.out
+#SBATCH --error=slurm-%j.err
+
+# Activate Python environment
+source /path/to/venv/bin/activate
+
+# Export any needed API keys
+export HF_TOKEN="..."
+export MP_API_KEY="..."
+
+# Run your computation
+python3 my_script.py --arg1 value1 --format json > results.json
+
+echo "Done: $(date)"
 ```
 
-### `slurm_submit.py` — Submit an arbitrary batch script
+For CPU jobs, remove `--gres=gpu:1` and use `--partition=venkvis-cpu`.
+
+Key `#SBATCH` directives:
+- `--partition=<name>` — which queue (see table above)
+- `--gres=gpu:<N>` — request N GPUs (GPU partitions only)
+- `--time=HH:MM:SS` — wall time limit
+- `--mem=<N>G` — memory per node
+- `--cpus-per-task=<N>` — CPU cores
+- `--output=<path>` / `--error=<path>` — stdout/stderr files (`%j` = job ID)
+- `--array=0-9` — submit a job array (10 tasks)
+
+## Submitting Jobs
+
 ```bash
-python3 {baseDir}/scripts/slurm_submit.py --script path/to/job.sh --format json
-python3 {baseDir}/scripts/slurm_submit.py --script job.sh --partition venkvis-a100 --format json
+# Submit a script
+sbatch submit.sh
+
+# Submit with partition override
+sbatch --partition=venkvis-h100 submit.sh
+
+# Submit with dependency (run after job 12345 completes)
+sbatch --dependency=afterok:12345 next_step.sh
 ```
 
-### `slurm_cancel.py` — Cancel a running or pending job
+Output: `Submitted batch job 12345`
+
+## Checking Job Status
+
 ```bash
-python3 {baseDir}/scripts/slurm_cancel.py --job-id 12345 --format json
+# Check your running/pending jobs
+squeue -u $USER
+
+# Check a specific job
+squeue -j 12345
+
+# Check a specific partition
+squeue -p venkvis-h100
+
+# Detailed job info (including completed jobs)
+sacct -j 12345 --format=JobID,State,Elapsed,ExitCode,NodeList,MaxRSS
+
+# Check estimated start time for pending job
+squeue -j 12345 --start
 ```
 
-## Parameters
+Key job states: `PENDING`, `RUNNING`, `COMPLETED`, `FAILED`, `CANCELLED`, `TIMEOUT`, `OUT_OF_MEMORY`.
 
-| Parameter | Script | Description |
-|-----------|--------|-------------|
-| `--job-id` | status, cancel | SLURM job ID |
-| `--queue` | status | Show queue overview instead of single job |
-| `--partition` | status, submit | Partition name (e.g. `venkvis-cpu`, `venkvis-h100`) |
-| `--script` | submit | Path to SLURM batch script |
-| `--format` | all | `summary` \| `json` |
+## Retrieving Results
 
-## Safety
-- Never submit from inside a compute node (checks `SLURM_JOB_ID`)
-- Cancel requires explicit `--job-id`; no bulk cancel support
-- Write large scratch data to `/scratch/`, not `/nfs/turbo/` or `/home/`
+After a job completes, results are wherever your script wrote them:
+
+```bash
+# Check if job finished
+sacct -j 12345 --format=JobID,State,Elapsed,ExitCode --noheader
+
+# Read stdout/stderr
+cat slurm-12345.out
+cat slurm-12345.err
+
+# Read structured results (if your script wrote JSON)
+cat results.json | python3 -m json.tool
+```
+
+## Cancelling Jobs
+
+```bash
+# Cancel a specific job
+scancel 12345
+
+# Cancel all your jobs
+scancel -u $USER
+
+# Cancel all pending jobs
+scancel -u $USER --state=PENDING
+```
+
+## Safety Rules
+
+- **Never submit from inside a compute node** — check with `echo $SLURM_JOB_ID` (should be empty on login node)
+- **Never install packages globally** — always use a virtualenv
+- **Write large temporary data to `/scratch/`**, not `/nfs/turbo/` or `/home/`
+- **Respect wall time limits** — GPU partitions have 8h max, CPU has 48h
+- Jobs inherit environment variables from the submitting shell by default
