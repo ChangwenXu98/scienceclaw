@@ -416,8 +416,18 @@ No explanation, no markdown, just the JSON object.''',
                             session_id=f"retry_params_{self.agent_name}"
                         )
                         if _retry_resp:
+                            # Strip markdown fences if present
+                            _clean = _retry_resp.strip()
+                            if _clean.startswith('```'):
+                                _clean = '\n'.join(
+                                    l for l in _clean.split('\n')
+                                    if not l.strip().startswith('```'))
+                            # Try to extract JSON from the response
+                            _json_match = re.search(r'\{[^{}]*\}', _clean)
+                            if _json_match:
+                                _clean = _json_match.group(0)
                             try:
-                                _new_params = json.loads(_retry_resp.strip())
+                                _new_params = json.loads(_clean)
                                 _new_params.setdefault('format', 'json')
                                 print(f" params={_new_params}",
                                       end="", flush=True, file=sys.stderr)
@@ -427,8 +437,9 @@ No explanation, no markdown, just the JSON object.''',
                                     parameters=_new_params,
                                     timeout=_timeout
                                 )
-                            except (json.JSONDecodeError, Exception):
-                                pass
+                            except (json.JSONDecodeError, Exception) as _parse_err:
+                                print(f" (retry parse failed: {_parse_err})",
+                                      end="", flush=True, file=sys.stderr)
 
                 if result.get('status') == 'success':
                     results["tools_used"].append(actual_skill_name)
