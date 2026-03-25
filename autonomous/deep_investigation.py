@@ -235,6 +235,9 @@ class DeepInvestigator:
         skill_selection = SkillSelection(topic=topic, selected_skills=selected)
         print(f"  🛠️  Executing {len(selected)} skills: {[s.name for s in selected]}")
 
+        # Collect prior skill outputs for context passing between skills
+        _prior_skill_outputs = []
+
         for i, skill in enumerate(skill_selection.selected_skills, 1):
             skill_name = skill.name
             actual_skill_name = skill_name
@@ -393,6 +396,19 @@ class DeepInvestigator:
                         _executables = skill_meta.get('executables', [])
                         _script_name = Path(_executables[0]).name if _executables else 'unknown'
 
+                        # Build context from prior skill outputs
+                        _prior_context = ""
+                        if _prior_skill_outputs:
+                            _prior_lines = []
+                            for _po in _prior_skill_outputs[-3:]:  # last 3
+                                _po_str = json.dumps(_po["output"], default=str)
+                                _prior_lines.append(
+                                    f'- {_po["skill"]}: {_po_str[:500]}')
+                            _prior_context = (
+                                "\n\nPrior skill outputs (use these for "
+                                "file paths, directories, etc.):\n"
+                                + "\n".join(_prior_lines))
+
                         _retry_resp = _retry_client.call(
                             prompt=f'''A skill script "{_script_name}" failed with this error:
 {_err_msg[:500]}
@@ -400,6 +416,7 @@ class DeepInvestigator:
 The task is: "{topic}"
 The skill's reason: {skill.reason}
 The parameters that were tried: {json.dumps(params)}
+{_prior_context}
 
 Here is the skill's documentation (SKILL.md):
 {_skill_md[:3000]}
@@ -409,6 +426,7 @@ INSTRUCTIONS:
 2. Identify the EXACT parameter names from the Parameters table for that script
 3. Map the task requirements to those exact parameter names
 4. Include all REQUIRED parameters
+5. If prior skills produced output directories or file paths, use those as input paths for this skill
 
 Return ONLY a JSON object like {{"param1": "value1", "param2": "value2"}}.
 No explanation, no markdown, just the JSON object.''',
@@ -444,6 +462,12 @@ No explanation, no markdown, just the JSON object.''',
                 if result.get('status') == 'success':
                     results["tools_used"].append(actual_skill_name)
                     skill_result = result.get('result', {})
+
+                    # Collect output for context passing to subsequent skills
+                    _prior_skill_outputs.append({
+                        "skill": actual_skill_name,
+                        "output": skill_result,
+                    })
 
                     # Normalise wrapped output (skill_executor wraps unparseable text as {"output": ...})
                     if isinstance(skill_result, dict) and 'output' in skill_result:
