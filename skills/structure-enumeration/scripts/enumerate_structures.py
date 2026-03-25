@@ -28,9 +28,9 @@ def fetch_from_mp(formula: str) -> "Structure":
             fields=["material_id", "structure", "formula_pretty"],
         )
         if not docs:
-            print(f"Error: no structure found in MP for '{formula}'",
+            print(f"Warning: no structure found in MP for '{formula}', skipping",
                   file=sys.stderr)
-            sys.exit(1)
+            return None, None
         # Pick the first (lowest energy) entry
         return docs[0].structure, docs[0].material_id
 
@@ -110,6 +110,8 @@ def main():
                   file=sys.stderr)
             try:
                 structure, mp_id = fetch_from_mp(formula)
+                if structure is None:
+                    continue
                 metal = identify_metal_site(structure)
                 prototypes.append((structure, formula, metal))
                 print(f"  Found {mp_id}: {structure.composition.reduced_formula}, "
@@ -151,8 +153,14 @@ def main():
                   file=sys.stderr)
 
     if not prototypes:
-        print("Error: no prototype structures loaded", file=sys.stderr)
-        sys.exit(1)
+        output = {
+            "status": "no_prototypes_found",
+            "error": "No prototype structures could be loaded from Materials Project. "
+                     "Try different formulas or provide local CIF files via --prototype-files.",
+            "attempted_formulas": args.prototypes.split(",") if args.prototypes else [],
+        }
+        print(json.dumps(output, indent=2))
+        return
 
     # Generate substituted structures
     generated = []

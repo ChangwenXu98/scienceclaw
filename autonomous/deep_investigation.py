@@ -338,7 +338,10 @@ class DeepInvestigator:
 "{topic}"
 
 Return ONLY a JSON object with these keys:
-- "prototypes": comma-separated formulas to fetch from Materials Project (e.g. "LaH3,CaH2")
+- "prototypes": comma-separated formulas to fetch from Materials Project (e.g. "LaH3,CaH2,YH2")
+  IMPORTANT: Use formulas that exist in Materials Project at ambient pressure.
+  High-pressure phases like LaH10, CaH6, YH9 are NOT in MP.
+  Good choices for hydrides: LaH3, LaH2, CaH2, YH2, YH3, ScH2, BaH2, CeH3, ThH2
 - "metals": comma-separated target metals for substitution (e.g. "Y,Ca,Sc,Ce")
 
 Example: {{"prototypes": "LaH3,CaH2", "metals": "Y,Sc,Ce"}}
