@@ -256,6 +256,31 @@ The agent autonomously decided prototypes and metals from just "superhydrides". 
 5. `phonon` — compute phonon properties for stable candidates → SLURM
 6. `job-results` — read phonon results, identify dynamically stable candidates
 
+### Test Results (2026-03-25)
+
+**5-skill pipeline test**: `scienceclaw-post --skills materials,structure-enumeration,uma,job-results,phonon`
+
+| Skill | Status | Notes |
+|-------|--------|-------|
+| structure-enumeration | ✓ | Retry → prototypes: LaH10,CaH6; metals: Y,Ca,Sc,Ce,Ba |
+| materials | ✓ | First-try success |
+| uma | ✓ | Retry → submitted to SLURM, completed |
+| phonon | ✓ (locally) | Retry → submitted to SLURM, but **SLURM job failed** |
+| job-results | ✗ | Boolean flag bug (fixed: `--filter-stable True` → `--filter-stable`) |
+
+**Phonon SLURM failure cause**: LLM passed `--structures-dir .` instead of the UMA output directory. The phonon skill doesn't know where UMA wrote relaxed CIFs because **skills don't share context**.
+
+**Root limitation**: In a single `scienceclaw-post` call, skills execute sequentially but don't pass outputs between them. The phonon skill can't know the UMA output directory because it wasn't told.
+
+**Mitigation options**:
+1. Run in two sequential `scienceclaw-post` calls (step 1: enumerate+relax, step 2: read+phonon)
+2. Use code-execution to write a chaining script
+3. Enhance the framework to pass prior skill outputs to subsequent skills
+
+### Files changed
+- `core/skill_executor.py`: FIXED boolean flag handling (True → flag only, False → skip)
+- `skills/job-results/scripts/read_job_results.py`: FIXED skip ERROR results when scanning
+
 ## Open Questions
 
 1. Should the agent be able to call skills multiple times in one investigation? (Iterative execution)
