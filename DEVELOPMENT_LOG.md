@@ -201,8 +201,27 @@ This is fully generic — works for any skill without knowing its name.
   - ADDED: generic timeout detection from SKILL.md content (GPU/SLURM keywords → 300s)
   - ADDED: generic retry mechanism after param errors — reads SKILL.md, asks LLM for correct params, retries once
 
-### Status: NEEDS TESTING
-The retry mechanism is implemented but untested. The previous special-cased code has been fully removed.
+### Test Results (2026-03-25)
+
+**Prompt: "Screen superhydride candidates for superconductivity"** (no specific formulas)
+
+| Skill | First attempt | Retry result |
+|-------|--------------|--------------|
+| materials | Timed out (60s) | N/A |
+| structure-enumeration | Wrong params → failed | SKILL.md retry → `{prototypes: LaH10,CaH6,YH10,ScH3, metals: Y,Ca,Sc,Ce,Ba,La,Sr,Li,Na,K}` → **SUCCESS** |
+| uma (uma_screen.py) | Wrong params → failed | SKILL.md retry → `{structures-dir: '.', pressures: 100,150,200}` → **SUCCESS** |
+
+The agent autonomously decided prototypes and metals from just "superhydrides". No hardcoded hints.
+
+### Remaining issues
+- UMA retry picked `structures-dir: '.'` instead of `~/.scienceclaw/enumerated_structures` — works if CIFs happen to be there, but fragile. Need to pass prior skill output context to retry prompt.
+- `materials` skill timed out (60s default for info-retrieval skills). Its SKILL.md doesn't mention GPU/SLURM so it gets the short timeout.
+
+### Files changed
+- `autonomous/deep_investigation.py`:
+  - REMOVED: lines 325-434 (all skill-specific handling)
+  - ADDED: generic retry mechanism (lines 379-441): on param error, read SKILL.md, ask LLM for correct params with script name context, strip markdown, extract JSON, retry once
+  - CHANGED: timeout detection from hardcoded skill names to SKILL.md keyword scan
 
 ## Open Questions
 
