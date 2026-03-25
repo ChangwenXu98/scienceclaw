@@ -281,6 +281,33 @@ The agent autonomously decided prototypes and metals from just "superhydrides". 
 - `core/skill_executor.py`: FIXED boolean flag handling (True → flag only, False → skip)
 - `skills/job-results/scripts/read_job_results.py`: FIXED skip ERROR results when scanning
 
+### Full Pipeline Test (2026-03-25, latest)
+
+**5-skill pipeline with context passing**: All autonomous, no hardcoded params.
+
+| Skill | Status | Retry params (from LLM reading SKILL.md) |
+|-------|--------|------------------------------------------|
+| materials | ✗ timeout | — |
+| structure-enumeration | ✓ | `{prototypes: LaH10,CaH6, metals: Y,Ca,Sc,Ce,Ba}` |
+| uma | ✓ | `{structures-dir: '.', pressures: 0,50,100,150}` → SLURM |
+| phonon | ✓ | `{structures-dir: <UMA output dir from prior context>}` → SLURM |
+| job-results | ✓ | `{job-id: <from phonon output>, output-dir: <from prior context>}` |
+
+**Key achievement**: The phonon skill correctly used the UMA output directory from prior skill context. The job-results skill correctly picked up the phonon job ID. This is **autonomous skill chaining** — no hardcoded paths.
+
+### Files changed
+- `autonomous/deep_investigation.py`:
+  - ADDED: `_prior_skill_outputs` list to collect each skill's output
+  - ADDED: prior context passed to retry prompt (last 3 skill outputs, truncated to 500 chars each)
+  - Retry prompt now instructs LLM to use prior skill file paths
+- `core/skill_executor.py`:
+  - FIXED: strip leading `--` from param keys (LLM sometimes returns `"--key"`)
+  - FIXED: skip `None` values instead of passing `--key None`
+  - FIXED: boolean `True` → flag only, `False` → skip
+
+### Phonon job running
+Job 27019309 running on H100, analyzing 36 relaxed structures from UMA screening. Early results show dynamically unstable candidates (imaginary frequencies).
+
 ## Open Questions
 
 1. Should the agent be able to call skills multiple times in one investigation? (Iterative execution)
