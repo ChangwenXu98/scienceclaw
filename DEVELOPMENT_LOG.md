@@ -223,6 +223,39 @@ The agent autonomously decided prototypes and metals from just "superhydrides". 
   - ADDED: generic retry mechanism (lines 379-441): on param error, read SKILL.md, ask LLM for correct params with script name context, strip markdown, extract JSON, retry once
   - CHANGED: timeout detection from hardcoded skill names to SKILL.md keyword scan
 
+## Phase 7: Phonon Skill, Job Results, Multi-Step Screening (2026-03-25)
+
+### What was implemented
+
+**job-results skill** (`skills/job-results/`):
+- `read_job_results.py`: reads SLURM output files, parses JSON results, filters by stability criteria, lists CIF paths for stable candidates
+- Skips error/failed results when scanning output files
+- Bridges gap between job submission and next pipeline step
+
+**phonon skill** (`skills/phonon/`):
+- `phonon_stability.py`: computes phonon properties via phonopy + UMA finite-displacement method
+- Generates displaced supercells, computes forces with UMA, builds force constants
+- Checks for imaginary modes → dynamic stability flag
+- Computes thermal properties (free energy, entropy, heat capacity at 0-600K)
+- Auto-submits to SLURM when no GPU available
+- Reference: adapted from https://github.com/hyllios/utils/tree/main/benchmark_ph
+
+### Files changed
+- `skills/phonon/SKILL.md` — NEW: phonon skill documentation
+- `skills/phonon/scripts/phonon_stability.py` — NEW: phonon calculation + stability check
+- `skills/job-results/SKILL.md` — NEW: job results reading skill documentation
+- `skills/job-results/scripts/read_job_results.py` — NEW: SLURM output parser + candidate filter
+- `artifacts/artifact.py` — ADDED: phonon, job-results to SKILL_DOMAIN_MAP
+- `artifacts/reactor.py` — ADDED: phonon, job-results to SKILL_INPUT_MAP
+
+### Intended multi-step pipeline
+1. `materials` — search MP for prototype structures
+2. `structure-enumeration` — substitute metals, generate CIF candidates
+3. `uma` (uma_screen.py) — relax all at 0/150 GPa, formation energy, hull analysis → SLURM
+4. `job-results` — read screening results, identify stable candidates, list their CIF paths
+5. `phonon` — compute phonon properties for stable candidates → SLURM
+6. `job-results` — read phonon results, identify dynamically stable candidates
+
 ## Open Questions
 
 1. Should the agent be able to call skills multiple times in one investigation? (Iterative execution)
