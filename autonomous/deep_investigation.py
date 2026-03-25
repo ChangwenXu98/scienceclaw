@@ -322,12 +322,11 @@ class DeepInvestigator:
                     # calls; overriding them all with the same topic string is what caused
                     # every pubmed call to execute the identical query.
 
-                # Computational skills: strip query fallback — these accept
-                # specific params (--code, --metals, --structure), not --query
+                # Computational skills: the LLM selector generates wrong param
+                # names (e.g. --prototype-structures instead of --prototypes).
+                # Strip ALL LLM-provided params — we'll extract correct ones below.
                 if _skill_base in ('code-execution', 'uma', 'structure-enumeration'):
-                    params.pop('query', None)
-                    params.pop('search', None)
-                    params.pop('term', None)
+                    params.clear()
 
                 # Parameter extraction for computational skills that need
                 # specific CLI flags the LLM selector didn't provide.
@@ -355,6 +354,10 @@ Return ONLY the JSON, nothing else.''',
                             print(f"    Extracted params: {_extracted}", file=sys.stderr)
                         except json.JSONDecodeError:
                             pass
+
+                # Ensure JSON output for all computational skills
+                if _skill_base in ('code-execution', 'uma', 'structure-enumeration'):
+                    params.setdefault('format', 'json')
 
                 if _skill_base == 'uma' and not any(k in params for k in ('structures_dir', 'structures-dir')):
                     # Default to the well-known enumeration output directory
