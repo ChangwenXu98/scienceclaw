@@ -126,6 +126,31 @@ Both tracks initially failed because the agent runs on a login node without GPU.
 - SLURM job failed (exit code 2) — likely a script path or syntax issue in the LLM-generated SLURM script
 - The code generation capability itself is proven; execution reliability needs improvement
 
+## Phase 5: Removing Hardcoded Prototypes (IN PROGRESS)
+
+### What was implemented
+- **`structure-enumeration` skill**: Generic element substitution tool. Accepts --prototypes (formulas to fetch from MP), --metals, --output-dir. Not hydride-specific.
+- **`uma_screen.py` rewritten**: Removed all hardcoded prototypes (PROTOTYPES dict). Now reads CIF files from --structures-dir (default: ~/.scienceclaw/enumerated_structures). The agent decides what to screen.
+- **LLM parameter extraction**: When structure-enumeration gets no params from the LLM selector, a separate LLM call extracts --prototypes and --metals from the topic string.
+- **Default chaining via filesystem**: enumeration writes to ~/.scienceclaw/enumerated_structures/, uma_screen reads from the same path by default.
+
+### Standalone tests
+- `enumerate_structures.py --prototypes LaH3,CaH2 --metals Y,Sc,Ce` works: fetches from MP, substitutes, writes CIFs
+- `uma_screen.py --structures-dir ~/.scienceclaw/enumerated_structures --dry-run` works: finds CIFs, shows plan
+
+### Agent framework tests
+- Blocked by Anthropic API 529 (overloaded) errors — the LLM skill selector call fails, causing fallback to keyword-based selection that only picks `materials`
+- The parameter extraction and SLURM auto-submit code was never reached
+- Need to retry when API is available
+
+### Key design: 3-skill pipeline
+The agent's autonomous flow is now:
+1. `materials`: search MP for prototype hydride structures (LLM decides which)
+2. `structure-enumeration`: fetch prototypes from MP, substitute metals → CIFs to well-known dir
+3. `uma` (uma_screen.py): read CIFs from well-known dir → relax → formation energy → hull
+
+Each skill runs once. Chaining happens through the filesystem (shared directory). The LLM reasons about WHAT to screen; the skills handle HOW.
+
 ## Open Questions
 
 1. Should the agent be able to call skills multiple times in one investigation? (Iterative execution)

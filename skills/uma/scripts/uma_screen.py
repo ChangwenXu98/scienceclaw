@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """
-uma_screen.py — Hydride superconductor screening pipeline.
+uma_screen.py — Relax a set of crystal structures with UMA at multiple pressures.
 
-Enumerates MHx structures from prototypes, relaxes each with UMA at multiple
-pressures, computes formation energies, and checks 0 GPa stability against
-the Materials Project convex hull.
+Reads CIF files from --structures-dir (default: ~/.scienceclaw/enumerated_structures),
+relaxes each at each pressure using UMA, computes formation energies, and checks
+0 GPa stability against the Materials Project convex hull.
+
+No hardcoded prototypes — structures come from the structure-enumeration skill
+or any other source that produces CIF files.
 
 ScienceClaw skill contract: argparse, --format json, JSON on stdout.
-Progress/diagnostics go to stderr.
 """
 
 import argparse
@@ -18,128 +20,82 @@ import time
 import traceback
 from pathlib import Path
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
 GPA_TO_EV_PER_A3 = 1.0 / 160.21766208
-
-# Elemental reference lattice parameters
-ELEMENT_REFS = {
-    "La": {"crystal": "fcc", "a": 5.31},
-    "Y":  {"crystal": "hcp", "a": 3.65, "c": 5.73},
-    "Ca": {"crystal": "fcc", "a": 5.58},
-    "Ce": {"crystal": "fcc", "a": 5.16},
-    "Sc": {"crystal": "hcp", "a": 3.31, "c": 5.27},
-}
-
-# Prototypes defined by spacegroup + Wyckoff positions
-PROTOTYPES = {
-    6: {
-        "label": "CaH6-type",
-        "spacegroup": 229,   # Im-3m
-        "a": 3.54,
-        "species": ["M", "H"],
-        "coords": [
-            [0.0, 0.0, 0.0],       # 2a  — metal
-            [0.25, 0.0, 0.5],       # 12d — hydrogen
-        ],
-    },
-    10: {
-        "label": "LaH10-type",
-        "spacegroup": 225,   # Fm-3m
-        "a": 5.10,
-        "species": ["M", "H", "H"],
-        "coords": [
-            [0.0, 0.0, 0.0],           # 4a  — metal
-            [0.25, 0.25, 0.25],         # 8c  — hydrogen
-            [0.118, 0.118, 0.118],      # 32f — hydrogen (clathrate cage)
-        ],
-    },
-    # YH9 P63/mmc (hexagonal) intentionally skipped — uniformly unstable
-}
+DEFAULT_STRUCTURES_DIR = Path.home() / ".scienceclaw" / "enumerated_structures"
 
 
 def log(msg: str) -> None:
-    """Print progress to stderr."""
     print(f"[uma_screen] {msg}", file=sys.stderr, flush=True)
 
 
-# ---------------------------------------------------------------------------
-# Structure builders
-# ---------------------------------------------------------------------------
-
-def build_prototype(metal: str, stoich: int) -> "pymatgen.core.Structure":
-    """Build an MHx structure from a prototype using pymatgen."""
-    from pymatgen.core import Structure, Lattice
-
-    proto = PROTOTYPES[stoich]
-    species = [metal if s == "M" else s for s in proto["species"]]
-    lattice = Lattice.cubic(proto["a"])
-    structure = Structure.from_spacegroup(
-        proto["spacegroup"],
-        lattice,
-        species,
-        proto["coords"],
-    )
-    return structure
+def find_cif_files(structures_dir: Path) -> list[Path]:
+    """Find all CIF files in the given directory."""
+    if not structures_dir.exists():
+        return []
+    return sorted(structures_dir.glob("*.cif"))
 
 
-def pymatgen_to_ase(structure) -> "ase.Atoms":
-    """Convert a pymatgen Structure to an ASE Atoms object."""
-    from ase import Atoms
-
-    atoms = Atoms(
-        symbols=[str(s) for s in structure.species],
-        positions=structure.cart_coords,
-        cell=structure.lattice.matrix,
-        pbc=True,
-    )
-    return atoms
+def read_structure(cif_path: Path):
+    """Read a CIF file into ASE Atoms."""
+    from ase.io import read as ase_read
+    return ase_read(str(cif_path))
 
 
-def build_element_reference(symbol: str) -> "ase.Atoms":
-    """Build elemental bulk reference with known lattice constants."""
+def identify_metal(atoms) -> str | None:
+    """Identify the metal element (heaviest non-H element) in a structure."""
+    from ase.data import atomic_numbers
+    symbols = set(atoms.get_chemical_symbols())
+    non_h = [s for s in symbols if s != "H"]
+    if not non_h:
+        return None
+    return max(non_h, key=lambda s: atomic_numbers.get(s, 0))
+
+
+def build_element_reference(symbol: str):
+    """Build elemental bulk reference. Uses ASE's built-in structures."""
     from ase.build import bulk
+    # Known ground-state structures with experimental lattice constants
+    refs = {
+        "La": ("fcc", {"a": 5.31}),
+        "Y":  ("hcp", {"a": 3.65, "c": 5.73}),
+        "Ca": ("fcc", {"a": 5.58}),
+        "Ce": ("fcc", {"a": 5.16}),
+        "Sc": ("hcp", {"a": 3.31, "c": 5.27}),
+        "Th": ("fcc", {"a": 5.08}),
+        "Lu": ("hcp", {"a": 3.50, "c": 5.55}),
+        "Ba": ("bcc", {"a": 5.02}),
+        "Sr": ("fcc", {"a": 6.08}),
+        "Mg": ("hcp", {"a": 3.21, "c": 5.21}),
+        "Li": ("bcc", {"a": 3.49}),
+        "Na": ("bcc", {"a": 4.23}),
+        "K":  ("bcc", {"a": 5.23}),
+    }
+    if symbol in refs:
+        crystal, params = refs[symbol]
+        return bulk(symbol, crystal, **params)
+    # Fallback: let ASE guess
+    return bulk(symbol)
 
-    ref = ELEMENT_REFS[symbol]
-    if ref["crystal"] == "hcp":
-        atoms = bulk(symbol, ref["crystal"], a=ref["a"], c=ref["c"])
-    else:
-        atoms = bulk(symbol, ref["crystal"], a=ref["a"])
-    return atoms
 
-
-def build_h2_reference() -> "ase.Atoms":
+def build_h2_reference():
     """Build an H2 molecule in a 10 A box."""
     from ase import Atoms
-
     h2 = Atoms("H2", positions=[[0, 0, 0], [0, 0, 0.74]], pbc=True)
     h2.set_cell([10.0, 10.0, 10.0])
     h2.center()
     return h2
 
 
-# ---------------------------------------------------------------------------
-# Relaxation
-# ---------------------------------------------------------------------------
-
-def relax_atoms(atoms, predictor, pressure_gpa: float,
-                fmax: float, steps: int) -> dict:
-    """
-    Relax an ASE Atoms object using UMA via FrechetCellFilter.
-
-    Returns a dict with energy, convergence info, etc.
-    """
+def relax_atoms(atoms, predictor, pressure_gpa, fmax, steps):
+    """Relax ASE Atoms with UMA at given pressure."""
     from ase.optimize import FIRE
     from ase.filters import FrechetCellFilter
     from fairchem.core import FAIRChemCalculator
+    import numpy as np
 
     calc = FAIRChemCalculator(predictor, task_name="omat")
     atoms.calc = calc
-
-    pressure_ev_a3 = pressure_gpa * GPA_TO_EV_PER_A3
-    filtered = FrechetCellFilter(atoms, scalar_pressure=pressure_ev_a3)
+    filtered = FrechetCellFilter(atoms, scalar_pressure=pressure_gpa * GPA_TO_EV_PER_A3)
     opt = FIRE(filtered, logfile=None)
 
     t0 = time.time()
@@ -148,53 +104,22 @@ def relax_atoms(atoms, predictor, pressure_gpa: float,
 
     energy = atoms.get_potential_energy()
     forces = atoms.get_forces()
-    import numpy as np
-    fmax_achieved = float(np.max(np.linalg.norm(forces, axis=1)))
+    fmax_val = float(np.max(np.linalg.norm(forces, axis=1)))
 
     return {
         "energy_eV": float(energy),
         "energy_per_atom_eV": float(energy / len(atoms)),
         "converged": bool(converged),
         "steps_taken": opt.nsteps,
-        "fmax_achieved": round(fmax_achieved, 6),
+        "fmax_achieved": round(fmax_val, 6),
         "volume_A3": float(atoms.get_volume()),
         "n_atoms": len(atoms),
         "elapsed_s": round(elapsed, 2),
     }
 
 
-# ---------------------------------------------------------------------------
-# Formation energy
-# ---------------------------------------------------------------------------
-
-def compute_formation_energy(
-    e_hydride_per_atom: float,
-    n_metal: int,
-    n_h: int,
-    e_metal_per_atom: float,
-    e_h2_total: float,
-) -> float:
-    """
-    Formation energy per atom (eV/atom).
-
-    E_f = [E(MHx) - n_M * e_M - (n_H / 2) * E(H2)] / (n_M + n_H)
-    """
-    n_total = n_metal + n_h
-    e_total = e_hydride_per_atom * n_total
-    e_f = (e_total - n_metal * e_metal_per_atom - (n_h / 2.0) * e_h2_total) / n_total
-    return e_f
-
-
-# ---------------------------------------------------------------------------
-# Convex hull
-# ---------------------------------------------------------------------------
-
-def get_e_above_hull(metal: str, formula: str, total_energy_eV: float) -> float | None:
-    """
-    Query MP for the M-H chemical system and compute energy above hull.
-
-    Returns eV/atom or None if MP query fails.
-    """
+def get_e_above_hull(metal, formula, total_energy_eV):
+    """Query MP convex hull at 0 GPa."""
     try:
         from mp_api.client import MPRester
         from pymatgen.analysis.phase_diagram import PhaseDiagram, PDEntry
@@ -202,380 +127,186 @@ def get_e_above_hull(metal: str, formula: str, total_energy_eV: float) -> float 
 
         api_key = os.environ.get("MP_API_KEY")
         if not api_key:
-            log("WARNING: MP_API_KEY not set, skipping convex hull check")
             return None
 
         chemsys = "-".join(sorted([metal, "H"]))
-        log(f"  Fetching MP entries for {chemsys} ...")
-
+        log(f"  Fetching MP hull for {chemsys}...")
         with MPRester(api_key) as mpr:
             entries = mpr.get_entries_in_chemsys(chemsys)
 
         my_entry = PDEntry(Composition(formula), total_energy_eV, name=f"UMA-{formula}")
-        all_entries = list(entries) + [my_entry]
-        pd = PhaseDiagram(all_entries)
-        e_hull = pd.get_e_above_hull(my_entry)
-        return float(e_hull)
-    except Exception as exc:
-        log(f"  Convex hull failed for {formula}: {exc}")
+        pd = PhaseDiagram(list(entries) + [my_entry])
+        return float(pd.get_e_above_hull(my_entry))
+    except Exception as e:
+        log(f"  Hull failed for {formula}: {e}")
         return None
 
 
-# ---------------------------------------------------------------------------
-# Main pipeline
-# ---------------------------------------------------------------------------
-
-def run_pipeline(args) -> dict:
-    """Execute the full screening pipeline."""
+def run_pipeline(args):
+    """Run the screening pipeline on CIF files from structures_dir."""
     from fairchem.core import pretrained_mlip
+    from ase.io import write as ase_write
 
-    metals = [m.strip() for m in args.metals.split(",")]
-    stoichs = [int(s.strip()) for s in args.stoichiometries.split(",")]
-    pressures = [float(p.strip()) for p in args.pressures.split(",")]
+    structures_dir = Path(args.structures_dir)
+    cif_files = find_cif_files(structures_dir)
 
+    if not cif_files:
+        return {"status": "ERROR", "error": f"No CIF files found in {structures_dir}"}
+
+    pressures = [float(p) for p in args.pressures.split(",")]
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # ------------------------------------------------------------------
-    # Validate metals
-    # ------------------------------------------------------------------
-    for m in metals:
-        if m not in ELEMENT_REFS:
-            raise ValueError(
-                f"Unknown metal '{m}'. Supported: {list(ELEMENT_REFS.keys())}"
-            )
+    log(f"Found {len(cif_files)} structures in {structures_dir}")
+    log(f"Pressures: {pressures} GPa")
 
-    # Validate stoichiometries
-    for s in stoichs:
-        if s not in PROTOTYPES:
-            raise ValueError(
-                f"No prototype for MH{s}. Available: {list(PROTOTYPES.keys())}"
-            )
-
-    # ------------------------------------------------------------------
-    # Load UMA predictor ONCE
-    # ------------------------------------------------------------------
-    log(f"Loading UMA model '{args.model}' on {args.device} ...")
+    # Load UMA
+    log(f"Loading UMA model '{args.model}' on {args.device}...")
     predictor = pretrained_mlip.get_predict_unit(args.model, device=args.device)
     log("Model loaded.")
 
-    # ------------------------------------------------------------------
-    # Compute elemental reference energies (at 0 GPa)
-    # ------------------------------------------------------------------
-    log("Computing elemental reference energies ...")
-    metal_ref_energies: dict[str, float] = {}
-    for m in metals:
-        log(f"  Relaxing {m} bulk reference ...")
-        ref_atoms = build_element_reference(m)
-        ref_result = relax_atoms(ref_atoms, predictor, 0.0, args.fmax, args.steps)
-        metal_ref_energies[m] = ref_result["energy_per_atom_eV"]
-        log(f"    {m}: {ref_result['energy_per_atom_eV']:.4f} eV/atom")
+    # Identify unique metals and compute elemental references
+    log("Scanning structures for metals...")
+    metals_found = set()
+    structure_info = []
+    for cif in cif_files:
+        atoms = read_structure(cif)
+        metal = identify_metal(atoms)
+        formula = atoms.get_chemical_formula(mode="metal")
+        n_h = sum(1 for s in atoms.get_chemical_symbols() if s == "H")
+        n_metal = len(atoms) - n_h
+        metals_found.add(metal)
+        structure_info.append({
+            "cif_path": cif,
+            "atoms": atoms,
+            "metal": metal,
+            "formula": formula,
+            "n_metal": n_metal,
+            "n_h": n_h,
+            "label": cif.stem,
+        })
 
-    log("  Relaxing H2 reference ...")
-    h2_atoms = build_h2_reference()
-    h2_result = relax_atoms(h2_atoms, predictor, 0.0, args.fmax, args.steps)
+    log(f"Metals found: {metals_found}")
+
+    # Elemental references (at 0 GPa)
+    log("Computing elemental references...")
+    metal_ref = {}
+    for metal in metals_found:
+        if metal is None:
+            continue
+        log(f"  Relaxing {metal} bulk...")
+        ref_atoms = build_element_reference(metal)
+        r = relax_atoms(ref_atoms, predictor, 0.0, args.fmax, args.steps)
+        metal_ref[metal] = r["energy_per_atom_eV"]
+        log(f"    {metal}: {r['energy_per_atom_eV']:.4f} eV/atom")
+
+    log("  Relaxing H2...")
+    h2 = build_h2_reference()
+    h2_result = relax_atoms(h2, predictor, 0.0, args.fmax, args.steps)
     e_h2_total = h2_result["energy_eV"]
-    log(f"    H2: {e_h2_total:.4f} eV (molecule)")
+    log(f"    H2: {e_h2_total:.4f} eV")
 
-    # ------------------------------------------------------------------
-    # Enumerate and relax hydrides
-    # ------------------------------------------------------------------
+    # Relax each structure at each pressure
     results = []
+    total = len(structure_info) * len(pressures)
+    count = 0
 
-    for metal in metals:
-        for stoich in stoichs:
-            formula = f"{metal}H{stoich}"
-            proto = PROTOTYPES[stoich]
-            log(f"Building {formula} ({proto['label']}) ...")
+    for info in structure_info:
+        pressure_data = {}
+        for pressure in pressures:
+            count += 1
+            label = f"{info['label']}_{pressure:.0f}GPa"
+            log(f"  [{count}/{total}] {label}...")
 
+            atoms = info["atoms"].copy()
             try:
-                structure = build_prototype(metal, stoich)
-            except Exception as exc:
-                log(f"  ERROR building {formula}: {exc}")
-                results.append({
-                    "formula": formula,
-                    "prototype": proto["label"],
-                    "status": "BUILD_FAILED",
-                    "error": str(exc),
-                })
+                r = relax_atoms(atoms, predictor, pressure, args.fmax, args.steps)
+            except Exception as e:
+                log(f"    ERROR: {e}")
+                pressure_data[pressure] = {"status": "FAILED", "error": str(e)}
                 continue
 
-            atoms_template = pymatgen_to_ase(structure)
-            n_metal = sum(1 for s in atoms_template.get_chemical_symbols() if s != "H")
-            n_h = sum(1 for s in atoms_template.get_chemical_symbols() if s == "H")
+            # Save relaxed CIF
+            cif_out = output_dir / f"{label}.cif"
+            try:
+                ase_write(str(cif_out), atoms, format="cif")
+                r["cif_path"] = str(cif_out)
+            except Exception:
+                pass
 
-            pressure_data = {}
+            # Formation energy
+            metal = info["metal"]
+            if metal and metal in metal_ref:
+                n_total = info["n_metal"] + info["n_h"]
+                e_total = r["energy_per_atom_eV"] * n_total
+                e_f = (e_total - info["n_metal"] * metal_ref[metal]
+                       - (info["n_h"] / 2.0) * e_h2_total) / n_total
+                r["formation_energy_eV_per_atom"] = round(e_f, 6)
+            else:
+                r["formation_energy_eV_per_atom"] = None
 
-            for pressure in pressures:
-                label = f"{formula}_P{pressure:.0f}GPa"
-                log(f"  Relaxing {label} ...")
+            # Hull at 0 GPa
+            if pressure == 0.0 and metal:
+                r["e_above_hull_eV"] = get_e_above_hull(
+                    metal, info["formula"], r["energy_eV"])
 
-                atoms = atoms_template.copy()
-                try:
-                    relax_result = relax_atoms(
-                        atoms, predictor, pressure, args.fmax, args.steps
-                    )
-                except Exception as exc:
-                    log(f"    ERROR: {exc}")
-                    pressure_data[pressure] = {
-                        "status": "RELAX_FAILED",
-                        "error": str(exc),
-                    }
-                    continue
+            r["pressure_GPa"] = pressure
+            r["status"] = "COMPLETED"
+            pressure_data[pressure] = r
 
-                # Save relaxed CIF
-                cif_path = output_dir / f"{label}.cif"
-                try:
-                    from ase.io import write as ase_write
-                    ase_write(str(cif_path), atoms, format="cif")
-                    relax_result["cif_path"] = str(cif_path)
-                except Exception as exc:
-                    log(f"    WARNING: could not save CIF: {exc}")
+            ef_str = f"{r.get('formation_energy_eV_per_atom', 'N/A')}"
+            log(f"    E/atom={r['energy_per_atom_eV']:.4f} Ef={ef_str} "
+                f"{'converged' if r['converged'] else 'NOT converged'}")
 
-                # Formation energy
-                e_form = compute_formation_energy(
-                    relax_result["energy_per_atom_eV"],
-                    n_metal, n_h,
-                    metal_ref_energies[metal],
-                    e_h2_total,
-                )
-                relax_result["formation_energy_eV_per_atom"] = round(e_form, 6)
-                relax_result["pressure_GPa"] = pressure
-                relax_result["status"] = "COMPLETED"
+        results.append({
+            "label": info["label"],
+            "formula": info["formula"],
+            "metal": info["metal"],
+            "n_atoms": info["n_metal"] + info["n_h"],
+            "pressures": {f"{p:.0f}": pressure_data.get(p, {}) for p in pressures},
+        })
 
-                # Convex hull at 0 GPa only
-                if pressure == 0.0:
-                    e_hull = get_e_above_hull(
-                        metal, formula,
-                        relax_result["energy_eV"],
-                    )
-                    relax_result["e_above_hull_eV_per_atom"] = (
-                        round(e_hull, 6) if e_hull is not None else None
-                    )
-
-                pressure_data[pressure] = relax_result
-                log(
-                    f"    E={relax_result['energy_per_atom_eV']:.4f} eV/atom  "
-                    f"Ef={e_form:.4f} eV/atom  "
-                    f"{'converged' if relax_result['converged'] else 'NOT converged'}  "
-                    f"({relax_result['elapsed_s']:.1f}s)"
-                )
-
-            results.append({
-                "formula": formula,
-                "prototype": proto["label"],
-                "n_metal": n_metal,
-                "n_h": n_h,
-                "n_atoms": n_metal + n_h,
-                "pressures": {
-                    f"{p:.0f}": pressure_data[p]
-                    for p in sorted(pressure_data.keys())
-                },
-            })
-
-    # ------------------------------------------------------------------
     # Rank by formation energy at highest pressure
-    # ------------------------------------------------------------------
-    max_pressure = max(pressures)
-    p_key = f"{max_pressure:.0f}"
+    max_p = f"{max(pressures):.0f}"
 
     def sort_key(r):
-        pd = r.get("pressures", {}).get(p_key, {})
+        pd = r.get("pressures", {}).get(max_p, {})
         ef = pd.get("formation_energy_eV_per_atom")
-        if ef is None:
-            return 999.0
-        return ef
+        return ef if ef is not None else 999.0
 
     results.sort(key=sort_key)
 
-    # Build ranking summary
     ranking = []
     for rank, r in enumerate(results, 1):
-        pd = r.get("pressures", {}).get(p_key, {})
-        entry = {
-            "rank": rank,
-            "formula": r["formula"],
-            "prototype": r["prototype"],
-        }
+        pd = r.get("pressures", {}).get(max_p, {})
+        entry = {"rank": rank, "formula": r["formula"], "label": r["label"]}
         ef = pd.get("formation_energy_eV_per_atom")
         if ef is not None:
             entry["formation_energy_eV_per_atom"] = ef
             entry["converged"] = pd.get("converged", False)
-        # Include e_above_hull if available from 0 GPa data
-        hull_data = r.get("pressures", {}).get("0", {})
-        if hull_data.get("e_above_hull_eV_per_atom") is not None:
-            entry["e_above_hull_eV_per_atom_0GPa"] = hull_data["e_above_hull_eV_per_atom"]
+        hull = r.get("pressures", {}).get("0", {}).get("e_above_hull_eV")
+        if hull is not None:
+            entry["e_above_hull_eV_0GPa"] = round(hull, 6)
         ranking.append(entry)
 
     return {
         "status": "COMPLETED",
         "model": args.model,
-        "device": args.device,
-        "metals": metals,
-        "stoichiometries": stoichs,
+        "structures_dir": str(structures_dir),
+        "n_structures": len(structure_info),
         "pressures_GPa": pressures,
-        "fmax": args.fmax,
-        "max_steps": args.steps,
         "output_dir": str(output_dir),
         "ranking": ranking,
         "candidates": results,
         "reference_energies": {
-            "metals_eV_per_atom": metal_ref_energies,
+            "metals_eV_per_atom": metal_ref,
             "H2_eV": e_h2_total,
         },
     }
 
 
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
-
-def main():
-    parser = argparse.ArgumentParser(
-        description="Hydride superconductor screening with UMA",
-    )
-    parser.add_argument(
-        "--metals", type=str, default="La,Y,Ca,Ce,Sc",
-        help="Comma-separated list of metals to screen (default: La,Y,Ca,Ce,Sc)",
-    )
-    parser.add_argument(
-        "--stoichiometries", type=str, default="6,10",
-        help="Comma-separated hydrogen stoichiometries, e.g. 6,10 (default: 6,10)",
-    )
-    parser.add_argument(
-        "--pressures", type=str, default="0,150",
-        help="Comma-separated pressures in GPa (default: 0,150)",
-    )
-    parser.add_argument(
-        "--model", type=str, default="uma-m-1p1",
-        choices=["uma-s-1p1", "uma-s-1p2", "uma-m-1p1"],
-        help="UMA checkpoint (default: uma-m-1p1)",
-    )
-    parser.add_argument(
-        "--device", type=str, default="cuda",
-        help="Device: cuda or cpu (default: cuda)",
-    )
-    parser.add_argument(
-        "--fmax", type=float, default=0.05,
-        help="Force convergence threshold in eV/A (default: 0.05)",
-    )
-    parser.add_argument(
-        "--steps", type=int, default=200,
-        help="Max optimizer steps per relaxation (default: 200)",
-    )
-    parser.add_argument(
-        "--output-dir", type=str, default="./uma_screen_output",
-        help="Directory for relaxed CIF files (default: ./uma_screen_output)",
-    )
-    parser.add_argument(
-        "--format", type=str, default="json", choices=["json", "summary"],
-        help="Output format (default: json)",
-    )
-    parser.add_argument(
-        "--dry-run", action="store_true",
-        help="Validate inputs and show plan without running relaxations",
-    )
-
-    args = parser.parse_args()
-
-    # Auto-detect GPU availability; if no GPU, submit to SLURM
-    needs_slurm = False
-    if args.device == "cuda":
-        try:
-            import torch
-            if not torch.cuda.is_available():
-                needs_slurm = True
-        except ImportError:
-            needs_slurm = True
-
-    if needs_slurm and not args.dry_run:
-        _submit_to_slurm(args)
-        return
-
-    metals = [m.strip() for m in args.metals.split(",")]
-    stoichs = [int(s.strip()) for s in args.stoichiometries.split(",")]
-    pressures = [float(p.strip()) for p in args.pressures.split(",")]
-
-    # ------------------------------------------------------------------
-    # Dry run — show plan and exit
-    # ------------------------------------------------------------------
-    if args.dry_run:
-        candidates = []
-        for metal in metals:
-            for stoich in stoichs:
-                if stoich in PROTOTYPES:
-                    candidates.append({
-                        "formula": f"{metal}H{stoich}",
-                        "prototype": PROTOTYPES[stoich]["label"],
-                    })
-
-        plan = {
-            "status": "DRY_RUN",
-            "model": args.model,
-            "device": args.device,
-            "metals": metals,
-            "stoichiometries": stoichs,
-            "pressures_GPa": pressures,
-            "fmax": args.fmax,
-            "max_steps": args.steps,
-            "output_dir": args.output_dir,
-            "n_candidates": len(candidates),
-            "n_relaxations": len(candidates) * len(pressures),
-            "n_reference_relaxations": len(metals) + 1,  # metals + H2
-            "candidates": candidates,
-            "note": "YH9 P63/mmc skipped — uniformly unstable in prior screening",
-        }
-        print(json.dumps(plan, indent=2))
-        return
-
-    # ------------------------------------------------------------------
-    # Run pipeline
-    # ------------------------------------------------------------------
-    try:
-        output = run_pipeline(args)
-    except Exception as exc:
-        error_output = {
-            "status": "FAILED",
-            "error": str(exc),
-            "traceback": traceback.format_exc(),
-        }
-        print(json.dumps(error_output, indent=2))
-        sys.exit(1)
-
-    # ------------------------------------------------------------------
-    # Output
-    # ------------------------------------------------------------------
-    if args.format == "json":
-        print(json.dumps(output, indent=2))
-    else:
-        # Summary format
-        print(f"UMA Hydride Screening — {output['model']}")
-        print(f"Metals: {', '.join(output['metals'])}")
-        print(f"Pressures: {output['pressures_GPa']} GPa")
-        print()
-        print("Ranking (by formation energy at highest pressure):")
-        print("-" * 80)
-        for entry in output["ranking"]:
-            ef = entry.get("formation_energy_eV_per_atom", "N/A")
-            hull = entry.get("e_above_hull_eV_per_atom_0GPa", "N/A")
-            conv = entry.get("converged", "N/A")
-            if isinstance(ef, float):
-                ef = f"{ef:+.4f}"
-            if isinstance(hull, float):
-                hull = f"{hull:.4f}"
-            print(
-                f"  #{entry['rank']:2d}  {entry['formula']:8s}  "
-                f"{entry['prototype']:14s}  "
-                f"Ef={ef:>8s} eV/atom  "
-                f"Ehull(0GPa)={hull:>8s}  "
-                f"conv={conv}"
-            )
-        print()
-        print(f"CIF files saved to: {output['output_dir']}")
-
-
 def _submit_to_slurm(args):
-    """No GPU locally — submit this script to SLURM and return job info."""
+    """No GPU locally — submit this script to SLURM."""
     import subprocess
     from datetime import datetime, timezone
 
@@ -601,8 +332,7 @@ export MP_API_KEY="{os.environ.get('MP_API_KEY', '')}"
 export HF_TOKEN="{os.environ.get('HF_TOKEN', '')}"
 
 {sys.executable} {script_path} \\
-  --metals {args.metals} \\
-  --stoichiometries {args.stoichiometries} \\
+  --structures-dir {args.structures_dir} \\
   --pressures {args.pressures} \\
   --model {args.model} \\
   --device cuda \\
@@ -615,11 +345,9 @@ export HF_TOKEN="{os.environ.get('HF_TOKEN', '')}"
     submit_path.write_text(slurm_script)
     submit_path.chmod(0o755)
 
-    result = subprocess.run(["sbatch", str(submit_path)],
-                            capture_output=True, text=True)
+    result = subprocess.run(["sbatch", str(submit_path)], capture_output=True, text=True)
     if result.returncode != 0:
-        error = {"status": "error", "error": f"sbatch failed: {result.stderr.strip()}"}
-        print(json.dumps(error, indent=2))
+        print(json.dumps({"status": "error", "error": result.stderr.strip()}))
         sys.exit(1)
 
     job_id = None
@@ -627,16 +355,82 @@ export HF_TOKEN="{os.environ.get('HF_TOKEN', '')}"
         if word.isdigit():
             job_id = word
 
-    output = {
+    print(json.dumps({
         "status": "SUBMITTED_TO_SLURM",
         "job_id": job_id,
         "output_dir": str(out_dir),
-        "note": "No GPU on login node. Job submitted to venkvis-h100. "
-                f"Check status: squeue -j {job_id}. "
-                f"Results: cat {out_dir}/slurm-{job_id}.out",
-        "submit_time": datetime.now(timezone.utc).isoformat(),
-    }
-    print(json.dumps(output, indent=2))
+        "structures_dir": str(args.structures_dir),
+        "note": f"Check: squeue -j {job_id}. Results: cat {out_dir}/slurm-{job_id}.out",
+    }, indent=2))
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Relax structures with UMA at multiple pressures")
+    parser.add_argument("--structures-dir", default=str(DEFAULT_STRUCTURES_DIR),
+                        help=f"Directory of CIF files to relax "
+                             f"(default: {DEFAULT_STRUCTURES_DIR})")
+    parser.add_argument("--pressures", default="0,150",
+                        help="Comma-separated pressures in GPa (default: 0,150)")
+    parser.add_argument("--model", default="uma-m-1p1",
+                        choices=["uma-s-1p1", "uma-s-1p2", "uma-m-1p1"])
+    parser.add_argument("--device", default="cuda")
+    parser.add_argument("--fmax", type=float, default=0.05)
+    parser.add_argument("--steps", type=int, default=200)
+    parser.add_argument("--output-dir", default="./uma_screen_output")
+    parser.add_argument("--format", default="json", choices=["json", "summary"])
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args()
+
+    # Auto-detect GPU; submit to SLURM if unavailable
+    if args.device == "cuda" and not args.dry_run:
+        try:
+            import torch
+            if not torch.cuda.is_available():
+                _submit_to_slurm(args)
+                return
+        except ImportError:
+            _submit_to_slurm(args)
+            return
+
+    structures_dir = Path(args.structures_dir)
+
+    if args.dry_run:
+        cifs = find_cif_files(structures_dir)
+        pressures = [float(p) for p in args.pressures.split(",")]
+        plan = {
+            "status": "DRY_RUN",
+            "structures_dir": str(structures_dir),
+            "n_structures": len(cifs),
+            "structures": [f.stem for f in cifs],
+            "pressures_GPa": pressures,
+            "total_relaxations": len(cifs) * len(pressures),
+            "model": args.model,
+        }
+        print(json.dumps(plan, indent=2))
+        return
+
+    try:
+        output = run_pipeline(args)
+    except Exception as e:
+        print(json.dumps({"status": "FAILED", "error": str(e),
+                          "traceback": traceback.format_exc()}, indent=2))
+        sys.exit(1)
+
+    if args.format == "json":
+        print(json.dumps(output, indent=2))
+    else:
+        print(f"\n=== UMA Screening Results ===")
+        print(f"Structures: {output['n_structures']} from {output['structures_dir']}")
+        print(f"Pressures: {output['pressures_GPa']} GPa")
+        print()
+        for entry in output["ranking"]:
+            ef = entry.get("formation_energy_eV_per_atom", "N/A")
+            hull = entry.get("e_above_hull_eV_0GPa", "N/A")
+            ef_s = f"{ef:+.4f}" if isinstance(ef, float) else ef
+            hull_s = f"{hull:.4f}" if isinstance(hull, float) else hull
+            print(f"  #{entry['rank']:2d}  {entry['label']:<30s}  "
+                  f"Ef={ef_s:>8s}  Ehull={hull_s:>8s}")
 
 
 if __name__ == "__main__":

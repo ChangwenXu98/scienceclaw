@@ -110,68 +110,54 @@ python3 {baseDir}/scripts/uma_relax.py \
 | `uma-s-1p2` | 6.6M active / 290M total | Fast | Better |
 | `uma-m-1p1` | 50M active / 1.4B total | Slower | Best |
 
-### `uma_screen.py` — Hydride superconductor screening pipeline
+### `uma_screen.py` — Batch structure relaxation and stability screening
 
-Enumerate MHx structures from prototypes, relax at multiple pressures with UMA,
-compute formation energies, and check 0 GPa stability against the Materials Project
-convex hull. Outputs a ranked list of candidates.
+Relax all CIF files in a directory with UMA at multiple pressures, compute
+formation energies, and check 0 GPa stability against the Materials Project
+convex hull. **No hardcoded prototypes** — structures come from the
+`structure-enumeration` skill or any other source.
 
-**Dry run (show plan without running):**
+**Typical workflow:**
+1. Use `materials` skill to find prototype structures from MP
+2. Use `structure-enumeration` skill to generate candidates by metal substitution
+3. Use `uma_screen.py` to relax all candidates and assess stability
+
 ```bash
-python3 {baseDir}/scripts/uma_screen.py --dry-run --format json
-```
-
-**Default screening (La,Y,Ca,Ce,Sc at 0 and 150 GPa):**
-```bash
+# Relax all CIFs in the default enumeration directory
 python3 {baseDir}/scripts/uma_screen.py --format json
-```
 
-**Custom metals and pressures:**
-```bash
+# From a custom directory
 python3 {baseDir}/scripts/uma_screen.py \
-  --metals La,Y \
-  --stoichiometries 6,10 \
-  --pressures 0,100,200 \
-  --output-dir ./my_screen \
+  --structures-dir ./my_candidates \
+  --pressures 0,150 \
   --format json
 ```
 
-**On CPU (slower):**
-```bash
-python3 {baseDir}/scripts/uma_screen.py --device cpu --format json
-```
+If no GPU is available, the script auto-submits to SLURM (`venkvis-h100`).
 
 #### Screening Parameters
 
 | Parameter | Description |
 |-----------|-------------|
-| `--metals` | Comma-separated metals to screen (default: `La,Y,Ca,Ce,Sc`) |
-| `--stoichiometries` | Hydrogen stoichiometries, e.g. `6,10` (default: `6,10`) |
-| `--pressures` | Pressures in GPa, e.g. `0,150` (default: `0,150`) |
+| `--structures-dir` | Directory of CIF files to relax (default: `~/.scienceclaw/enumerated_structures`) |
+| `--pressures` | Pressures in GPa (default: `0,150`) |
 | `--model` | UMA checkpoint (default: `uma-m-1p1`) |
 | `--device` | `cuda` (default) or `cpu` |
-| `--fmax` | Force convergence threshold in eV/A (default: `0.05`) |
-| `--steps` | Max optimizer steps per relaxation (default: `200`) |
-| `--output-dir` | Directory for relaxed CIF files (default: `./uma_screen_output`) |
+| `--fmax` | Force convergence threshold (default: `0.05`) |
+| `--steps` | Max optimizer steps (default: `200`) |
+| `--output-dir` | Directory for relaxed CIFs (default: `./uma_screen_output`) |
 | `--format` | `json` or `summary` |
 | `--dry-run` | Show plan without running |
 
-#### Prototypes Used
-
-- **MH6:** CaH6-type (Im-3m, SG 229) — Ca at 2a (0,0,0), H at 12d (0.25,0,0.5), a=3.54 A
-- **MH10:** LaH10-type (Fm-3m, SG 225) — La at 4a (0,0,0), H at 8c (0.25,0.25,0.25), H at 32f (0.118,0.118,0.118), a=5.10 A
-- **YH9 P63/mmc:** Skipped (uniformly unstable in prior screening)
-
 #### Pipeline Steps
 
-1. Load UMA model once
-2. Relax elemental bulk references (La fcc, Y hcp, Ca fcc, Ce fcc, Sc hcp) and H2 molecule at 0 GPa
-3. Build MHx structures from prototypes using pymatgen `Structure.from_spacegroup`
-4. Relax each structure at each pressure using `FrechetCellFilter` with `scalar_pressure`
-5. Compute formation energy: `E_f = [E(MHx) - n_M*E_M - (n_H/2)*E(H2)] / n_total`
-6. At 0 GPa, query MP convex hull for energy above hull (`MP_API_KEY` required)
-7. Rank candidates by formation energy at highest pressure
-8. Save relaxed CIFs to `--output-dir`
+1. Scan `--structures-dir` for CIF files
+2. Identify metal elements in each structure
+3. Relax elemental references + H2 at 0 GPa
+4. Relax each structure at each pressure
+5. Compute formation energy per atom
+6. At 0 GPa, query MP convex hull for energy above hull
+7. Rank by formation energy, save relaxed CIFs
 
 #### Output (JSON)
 

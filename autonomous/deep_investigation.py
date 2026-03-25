@@ -324,10 +324,41 @@ class DeepInvestigator:
 
                 # Computational skills: strip query fallback — these accept
                 # specific params (--code, --metals, --structure), not --query
-                if _skill_base in ('code-execution', 'uma'):
+                if _skill_base in ('code-execution', 'uma', 'structure-enumeration'):
                     params.pop('query', None)
                     params.pop('search', None)
                     params.pop('term', None)
+
+                # Parameter extraction for computational skills that need
+                # specific CLI flags the LLM selector didn't provide.
+                if _skill_base == 'structure-enumeration' and 'metals' not in params:
+                    from core.llm_client import get_llm_client
+                    _param_client = get_llm_client(agent_name=self.agent_name)
+                    _param_resp = _param_client.call(
+                        prompt=f'''Extract parameters for structure enumeration from this task:
+"{topic}"
+
+Return ONLY a JSON object with these keys:
+- "prototypes": comma-separated formulas to fetch from Materials Project (e.g. "LaH3,CaH2")
+- "metals": comma-separated target metals for substitution (e.g. "Y,Ca,Sc,Ce")
+
+Example: {{"prototypes": "LaH3,CaH2", "metals": "Y,Sc,Ce"}}
+
+Return ONLY the JSON, nothing else.''',
+                        max_tokens=200,
+                        session_id=f"param_extract_{self.agent_name}"
+                    )
+                    if _param_resp:
+                        try:
+                            _extracted = json.loads(_param_resp.strip())
+                            params.update(_extracted)
+                            print(f"    Extracted params: {_extracted}", file=sys.stderr)
+                        except json.JSONDecodeError:
+                            pass
+
+                if _skill_base == 'uma' and not any(k in params for k in ('structures_dir', 'structures-dir')):
+                    # Default to the well-known enumeration output directory
+                    params['structures-dir'] = str(Path.home() / '.scienceclaw' / 'enumerated_structures')
 
                 # Stage 2 code generation: if code-execution was selected but no
                 # actual code was provided, use a separate LLM call to generate
