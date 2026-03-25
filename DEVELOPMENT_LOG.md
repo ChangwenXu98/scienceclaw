@@ -151,6 +151,29 @@ The agent's autonomous flow is now:
 
 Each skill runs once. Chaining happens through the filesystem (shared directory). The LLM reasons about WHAT to screen; the skills handle HOW.
 
+## Phase 5 Results (2026-03-25)
+
+### Successful end-to-end autonomous run
+The agent completed the full pipeline via `scienceclaw-post`:
+1. `materials` ✓ — searched MP
+2. `structure-enumeration` ✓ — LLM extracted {prototypes: LaH3,CaH2, metals: Y,Sc,Ce}, fetched from MP, generated 8 CIFs
+3. `uma` ✓ — auto-submitted to SLURM (job 27018190), completed in 1m43s on H100
+
+### Files changed in Phase 5
+- `skills/structure-enumeration/SKILL.md` — NEW: generic enumeration skill docs
+- `skills/structure-enumeration/scripts/enumerate_structures.py` — NEW: fetch from MP + substitute metals
+- `skills/uma/scripts/uma_screen.py` — REWRITTEN: removed PROTOTYPES dict, reads CIFs from --structures-dir
+- `skills/uma/SKILL.md` — UPDATED: documents new uma_screen.py interface
+- `autonomous/deep_investigation.py` — MODIFIED: params.clear() for compute skills, LLM param extraction for structure-enumeration, default --structures-dir for uma
+- `artifacts/artifact.py` — ADDED: structure-enumeration to SKILL_DOMAIN_MAP
+- `artifacts/reactor.py` — ADDED: structure-enumeration to SKILL_INPUT_MAP
+
+### Known issues
+- **Agent doesn't read SLURM results:** The UMA skill submits to SLURM and returns job info, but doesn't wait for or retrieve results. Results sit in `uma_screen_output/slurm-*.out`.
+- **Reasoning not recorded:** The LLM's parameter extraction reasoning (why it picked LaH3, CaH2) is printed to stderr but not persisted in journal or artifacts.
+- **materials skill returns wrong data:** The materials skill returns ceramic screening by default (Si-C, B-C systems), not the hydride structures requested. It doesn't pass the topic as a query.
+- **Untested:** Whether the agent can reason about "superhydrides" without specifying formulas.
+
 ## Open Questions
 
 1. Should the agent be able to call skills multiple times in one investigation? (Iterative execution)
