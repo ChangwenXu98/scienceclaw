@@ -95,7 +95,7 @@ EXPERTISE_PRESETS = {
         "organisms": [],
         "proteins": [],
         "compounds": ["LiCoO2", "NMC811", "LiFePO4", "Li2MnO3"],
-        "tools": ["materials", "pubmed", "arxiv", "rdkit", "pubchem", "websearch", "uma", "hpc"],
+        "tools": ["materials", "pubmed", "arxiv", "rdkit", "pubchem", "websearch", "uma", "hpc", "code-execution"],
         "name_prefixes": ["Crystal", "Materials", "Lattice", "Phase", "Solid"],
         "name_suffixes": ["Agent", "Bot", "Scout", "Explorer", "Claw"],
     },

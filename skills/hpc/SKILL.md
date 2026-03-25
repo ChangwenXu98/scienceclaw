@@ -139,6 +139,27 @@ scancel -u $USER
 scancel -u $USER --state=PENDING
 ```
 
+## Interactive GPU Sessions
+
+For quick debugging or running `scienceclaw-post` with GPU access:
+
+```bash
+# Interactive shell with H100 GPU (up to 8 hours)
+srun -N 1 -n 1 -p venkvis-h100 --gres=gpu:h100:1 --mem=32G -t 04:00:00 --pty bash
+
+# Interactive shell with A100 GPU
+srun -N 1 -n 1 -p venkvis-a100 --gres=gpu:a100:1 --mem=32G -t 04:00:00 --pty bash
+
+# Quick debug session (30 min max, fastest scheduling)
+srun --partition=debug --nodes=1 --gres=gpu:h100:1 --mem=2G --time=30 --pty bash
+```
+
+Once on the GPU node, activate the venv and run commands normally:
+```bash
+source /nfs/turbo/coe-venkvis/changwex/projects/scienceclaw/.venv/bin/activate
+scienceclaw-post --agent MatSim --topic "..." --skills uma --dry-run
+```
+
 ## Safety Rules
 
 - **Never submit from inside a compute node** — check with `echo $SLURM_JOB_ID` (should be empty on login node)

@@ -322,6 +322,79 @@ class DeepInvestigator:
                     # calls; overriding them all with the same topic string is what caused
                     # every pubmed call to execute the identical query.
 
+                # Computational skills: strip query fallback — these accept
+                # specific params (--code, --metals, --structure), not --query
+                if _skill_base in ('code-execution', 'uma'):
+                    params.pop('query', None)
+                    params.pop('search', None)
+                    params.pop('term', None)
+
+                # Stage 2 code generation: if code-execution was selected but no
+                # actual code was provided, use a separate LLM call to generate
+                # the Python code from the skill selector's high-level description.
+                if _skill_base == 'code-execution' and 'code' not in params and 'file' not in params:
+                    # Read the code-execution SKILL.md for examples
+                    skill_md_path = self.scienceclaw_dir / 'skills' / 'code-execution' / 'SKILL.md'
+                    skill_docs = skill_md_path.read_text() if skill_md_path.exists() else ''
+
+                    # Also read UMA and HPC SKILL.md for API reference
+                    uma_md_path = self.scienceclaw_dir / 'skills' / 'uma' / 'SKILL.md'
+                    uma_md = uma_md_path.read_text() if uma_md_path.exists() else ''
+                    hpc_md_path = self.scienceclaw_dir / 'skills' / 'hpc' / 'SKILL.md'
+                    hpc_md = hpc_md_path.read_text() if hpc_md_path.exists() else ''
+
+                    code_prompt = f'''You are writing Python code for a scientific computation.
+
+TASK: {topic}
+
+SKILL DOCUMENTATION (code-execution):
+{skill_docs[:2000]}
+
+UMA SKILL REFERENCE:
+{uma_md[:2000]}
+
+HPC/SLURM REFERENCE:
+{hpc_md[:1000]}
+
+The code-execution skill's REASON was: {skill.reason}
+Parameters provided: {json.dumps(params)}
+
+Write complete, executable Python code that:
+1. Performs the computational task described above
+2. Prints results as JSON to stdout (use json.dumps)
+3. Prints progress/status to stderr (use print(..., file=sys.stderr))
+4. Uses available libraries: pymatgen, ase, fairchem-core, mp-api, numpy
+5. Handles errors gracefully
+
+IMPORTANT:
+- Output ONLY the Python code, no markdown fences, no explanations
+- The code must be self-contained and executable
+- Print final results as valid JSON to stdout
+- Use os.environ.get("MP_API_KEY") for API keys, os.environ.get("HF_TOKEN") for HuggingFace
+- If the task requires GPU (e.g. UMA/fairchem), check torch.cuda.is_available() first.
+  If no GPU, write a SLURM batch script to a temp file and submit via subprocess.run(["sbatch", path]).
+  The SLURM script should use partition=venkvis-h100, gres=gpu:1, and run the computation there.
+  Print the SLURM job info as JSON and exit (the results will be in the SLURM output files).
+- Virtual env path: os.environ.get("VIRTUAL_ENV", "")'''
+
+                    from core.llm_client import get_llm_client
+                    _code_client = get_llm_client(agent_name=self.agent_name)
+                    generated_code = _code_client.call(
+                        prompt=code_prompt,
+                        max_tokens=4000,
+                        session_id=f"code_gen_{self.agent_name}"
+                    )
+
+                    # Clean up: remove markdown fences if present
+                    if generated_code:
+                        generated_code = generated_code.strip()
+                        if generated_code.startswith('```'):
+                            lines = generated_code.split('\n')
+                            lines = [l for l in lines if not l.strip().startswith('```')]
+                            generated_code = '\n'.join(lines)
+                        params['code'] = generated_code
+                        print(f"    Generated {len(generated_code)} chars of Python code", file=sys.stderr)
+
                 # Skills that require --smiles instead of a query string
                 _SMILES_SKILLS = {'askcos', 'rdkit', 'datamol', 'molfeat'}
 
@@ -351,11 +424,14 @@ class DeepInvestigator:
                 if _skill_base == 'uniprot' and 'format' not in params:
                     params['format'] = 'json'
 
+                # Allow longer timeout for computational skills
+                _timeout = 300 if actual_skill_name in ('code-execution', 'uma', 'dft') else 60
+
                 result = self.skill_executor.execute_skill(
                     skill_name=actual_skill_name,
                     skill_metadata=skill_meta,
                     parameters=params,
-                    timeout=60
+                    timeout=_timeout
                 )
 
                 if result.get('status') == 'success':

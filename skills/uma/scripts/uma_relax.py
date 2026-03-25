@@ -206,6 +206,16 @@ def main():
                         choices=["summary", "json"])
     args = parser.parse_args()
 
+    # Auto-detect GPU availability
+    if args.device == "cuda":
+        try:
+            import torch
+            if not torch.cuda.is_available():
+                print("No GPU detected, falling back to CPU", file=sys.stderr)
+                args.device = "cpu"
+        except ImportError:
+            args.device = "cpu"
+
     check_dependencies()
 
     atoms, source = resolve_structure(args)

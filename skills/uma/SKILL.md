@@ -110,6 +110,92 @@ python3 {baseDir}/scripts/uma_relax.py \
 | `uma-s-1p2` | 6.6M active / 290M total | Fast | Better |
 | `uma-m-1p1` | 50M active / 1.4B total | Slower | Best |
 
+### `uma_screen.py` — Hydride superconductor screening pipeline
+
+Enumerate MHx structures from prototypes, relax at multiple pressures with UMA,
+compute formation energies, and check 0 GPa stability against the Materials Project
+convex hull. Outputs a ranked list of candidates.
+
+**Dry run (show plan without running):**
+```bash
+python3 {baseDir}/scripts/uma_screen.py --dry-run --format json
+```
+
+**Default screening (La,Y,Ca,Ce,Sc at 0 and 150 GPa):**
+```bash
+python3 {baseDir}/scripts/uma_screen.py --format json
+```
+
+**Custom metals and pressures:**
+```bash
+python3 {baseDir}/scripts/uma_screen.py \
+  --metals La,Y \
+  --stoichiometries 6,10 \
+  --pressures 0,100,200 \
+  --output-dir ./my_screen \
+  --format json
+```
+
+**On CPU (slower):**
+```bash
+python3 {baseDir}/scripts/uma_screen.py --device cpu --format json
+```
+
+#### Screening Parameters
+
+| Parameter | Description |
+|-----------|-------------|
+| `--metals` | Comma-separated metals to screen (default: `La,Y,Ca,Ce,Sc`) |
+| `--stoichiometries` | Hydrogen stoichiometries, e.g. `6,10` (default: `6,10`) |
+| `--pressures` | Pressures in GPa, e.g. `0,150` (default: `0,150`) |
+| `--model` | UMA checkpoint (default: `uma-m-1p1`) |
+| `--device` | `cuda` (default) or `cpu` |
+| `--fmax` | Force convergence threshold in eV/A (default: `0.05`) |
+| `--steps` | Max optimizer steps per relaxation (default: `200`) |
+| `--output-dir` | Directory for relaxed CIF files (default: `./uma_screen_output`) |
+| `--format` | `json` or `summary` |
+| `--dry-run` | Show plan without running |
+
+#### Prototypes Used
+
+- **MH6:** CaH6-type (Im-3m, SG 229) — Ca at 2a (0,0,0), H at 12d (0.25,0,0.5), a=3.54 A
+- **MH10:** LaH10-type (Fm-3m, SG 225) — La at 4a (0,0,0), H at 8c (0.25,0.25,0.25), H at 32f (0.118,0.118,0.118), a=5.10 A
+- **YH9 P63/mmc:** Skipped (uniformly unstable in prior screening)
+
+#### Pipeline Steps
+
+1. Load UMA model once
+2. Relax elemental bulk references (La fcc, Y hcp, Ca fcc, Ce fcc, Sc hcp) and H2 molecule at 0 GPa
+3. Build MHx structures from prototypes using pymatgen `Structure.from_spacegroup`
+4. Relax each structure at each pressure using `FrechetCellFilter` with `scalar_pressure`
+5. Compute formation energy: `E_f = [E(MHx) - n_M*E_M - (n_H/2)*E(H2)] / n_total`
+6. At 0 GPa, query MP convex hull for energy above hull (`MP_API_KEY` required)
+7. Rank candidates by formation energy at highest pressure
+8. Save relaxed CIFs to `--output-dir`
+
+#### Output (JSON)
+
+```json
+{
+  "status": "COMPLETED",
+  "model": "uma-m-1p1",
+  "ranking": [
+    {
+      "rank": 1,
+      "formula": "LaH10",
+      "prototype": "LaH10-type",
+      "formation_energy_eV_per_atom": -0.1234,
+      "converged": true,
+      "e_above_hull_eV_per_atom_0GPa": 0.045
+    }
+  ],
+  "candidates": [ ... ],
+  "reference_energies": { ... }
+}
+```
+
+---
+
 ## Python API (for scripting)
 
 You can also use UMA directly in Python without the CLI script:
