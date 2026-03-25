@@ -322,115 +322,9 @@ class DeepInvestigator:
                     # calls; overriding them all with the same topic string is what caused
                     # every pubmed call to execute the identical query.
 
-                # Computational skills: the LLM selector generates wrong param
-                # names (e.g. --prototype-structures instead of --prototypes).
-                # Strip ALL LLM-provided params — we'll extract correct ones below.
-                if _skill_base in ('code-execution', 'uma', 'structure-enumeration'):
-                    params.clear()
-
-                # Parameter extraction for computational skills that need
-                # specific CLI flags the LLM selector didn't provide.
-                if _skill_base == 'structure-enumeration' and 'metals' not in params:
-                    from core.llm_client import get_llm_client
-                    _param_client = get_llm_client(agent_name=self.agent_name)
-                    _param_resp = _param_client.call(
-                        prompt=f'''Extract parameters for structure enumeration from this task:
-"{topic}"
-
-Return ONLY a JSON object with these keys:
-- "prototypes": comma-separated formulas to fetch from Materials Project (e.g. "LaH3,CaH2,YH2")
-  IMPORTANT: Use formulas that exist in Materials Project at ambient pressure.
-  High-pressure phases like LaH10, CaH6, YH9 are NOT in MP.
-  Good choices for hydrides: LaH3, LaH2, CaH2, YH2, YH3, ScH2, BaH2, CeH3, ThH2
-- "metals": comma-separated target metals for substitution (e.g. "Y,Ca,Sc,Ce")
-
-Example: {{"prototypes": "LaH3,CaH2", "metals": "Y,Sc,Ce"}}
-
-Return ONLY the JSON, nothing else.''',
-                        max_tokens=200,
-                        session_id=f"param_extract_{self.agent_name}"
-                    )
-                    if _param_resp:
-                        try:
-                            _extracted = json.loads(_param_resp.strip())
-                            params.update(_extracted)
-                            print(f"    Extracted params: {_extracted}", file=sys.stderr)
-                        except json.JSONDecodeError:
-                            pass
-
-                # Ensure JSON output for all computational skills
-                if _skill_base in ('code-execution', 'uma', 'structure-enumeration'):
-                    params.setdefault('format', 'json')
-
-                if _skill_base == 'uma' and not any(k in params for k in ('structures_dir', 'structures-dir')):
-                    # Default to the well-known enumeration output directory
-                    params['structures-dir'] = str(Path.home() / '.scienceclaw' / 'enumerated_structures')
-
-                # Stage 2 code generation: if code-execution was selected but no
-                # actual code was provided, use a separate LLM call to generate
-                # the Python code from the skill selector's high-level description.
-                if _skill_base == 'code-execution' and 'code' not in params and 'file' not in params:
-                    # Read the code-execution SKILL.md for examples
-                    skill_md_path = self.scienceclaw_dir / 'skills' / 'code-execution' / 'SKILL.md'
-                    skill_docs = skill_md_path.read_text() if skill_md_path.exists() else ''
-
-                    # Also read UMA and HPC SKILL.md for API reference
-                    uma_md_path = self.scienceclaw_dir / 'skills' / 'uma' / 'SKILL.md'
-                    uma_md = uma_md_path.read_text() if uma_md_path.exists() else ''
-                    hpc_md_path = self.scienceclaw_dir / 'skills' / 'hpc' / 'SKILL.md'
-                    hpc_md = hpc_md_path.read_text() if hpc_md_path.exists() else ''
-
-                    code_prompt = f'''You are writing Python code for a scientific computation.
-
-TASK: {topic}
-
-SKILL DOCUMENTATION (code-execution):
-{skill_docs[:2000]}
-
-UMA SKILL REFERENCE:
-{uma_md[:2000]}
-
-HPC/SLURM REFERENCE:
-{hpc_md[:1000]}
-
-The code-execution skill's REASON was: {skill.reason}
-Parameters provided: {json.dumps(params)}
-
-Write complete, executable Python code that:
-1. Performs the computational task described above
-2. Prints results as JSON to stdout (use json.dumps)
-3. Prints progress/status to stderr (use print(..., file=sys.stderr))
-4. Uses available libraries: pymatgen, ase, fairchem-core, mp-api, numpy
-5. Handles errors gracefully
-
-IMPORTANT:
-- Output ONLY the Python code, no markdown fences, no explanations
-- The code must be self-contained and executable
-- Print final results as valid JSON to stdout
-- Use os.environ.get("MP_API_KEY") for API keys, os.environ.get("HF_TOKEN") for HuggingFace
-- If the task requires GPU (e.g. UMA/fairchem), check torch.cuda.is_available() first.
-  If no GPU, write a SLURM batch script to a temp file and submit via subprocess.run(["sbatch", path]).
-  The SLURM script should use partition=venkvis-h100, gres=gpu:1, and run the computation there.
-  Print the SLURM job info as JSON and exit (the results will be in the SLURM output files).
-- Virtual env path: os.environ.get("VIRTUAL_ENV", "")'''
-
-                    from core.llm_client import get_llm_client
-                    _code_client = get_llm_client(agent_name=self.agent_name)
-                    generated_code = _code_client.call(
-                        prompt=code_prompt,
-                        max_tokens=4000,
-                        session_id=f"code_gen_{self.agent_name}"
-                    )
-
-                    # Clean up: remove markdown fences if present
-                    if generated_code:
-                        generated_code = generated_code.strip()
-                        if generated_code.startswith('```'):
-                            lines = generated_code.split('\n')
-                            lines = [l for l in lines if not l.strip().startswith('```')]
-                            generated_code = '\n'.join(lines)
-                        params['code'] = generated_code
-                        print(f"    Generated {len(generated_code)} chars of Python code", file=sys.stderr)
+                # No skill-specific parameter handling. If the LLM selector
+                # provides wrong params, the generic retry-with-SKILL.md
+                # mechanism (after execution) will correct them.
 
                 # Skills that require --smiles instead of a query string
                 _SMILES_SKILLS = {'askcos', 'rdkit', 'datamol', 'molfeat'}
@@ -461,8 +355,19 @@ IMPORTANT:
                 if _skill_base == 'uniprot' and 'format' not in params:
                     params['format'] = 'json'
 
-                # Allow longer timeout for computational skills
-                _timeout = 300 if actual_skill_name in ('code-execution', 'uma', 'dft') else 60
+                # Timeout: check SKILL.md for hints, default 60s, cap at 600s
+                _skill_dir = self.scienceclaw_dir / 'skills' / _skill_base
+                _skill_md_path = _skill_dir / 'SKILL.md'
+                _skill_md = ''
+                if _skill_md_path.exists():
+                    try:
+                        _skill_md = _skill_md_path.read_text()
+                    except Exception:
+                        pass
+                # Use longer timeout if SKILL.md mentions GPU, SLURM, or relaxation
+                _timeout = 60
+                if any(kw in _skill_md.lower() for kw in ('gpu', 'slurm', 'relaxation', 'cuda', 'timeout')):
+                    _timeout = 300
 
                 result = self.skill_executor.execute_skill(
                     skill_name=actual_skill_name,
@@ -470,6 +375,53 @@ IMPORTANT:
                     parameters=params,
                     timeout=_timeout
                 )
+
+                # ── Generic retry: if skill failed, read SKILL.md and ask
+                # the LLM to generate correct parameters, then retry once. ──
+                if result.get('status') == 'error':
+                    _err_msg = result.get('error', '')
+                    _is_param_error = ('unrecognized arguments' in _err_msg
+                                       or 'required' in _err_msg
+                                       or 'error: the following' in _err_msg
+                                       or 'provide --' in _err_msg)
+                    if _is_param_error and _skill_md:
+                        print(f" ✗ (retrying with SKILL.md guidance)",
+                              end="", flush=True, file=sys.stderr)
+                        from core.llm_client import get_llm_client
+                        _retry_client = get_llm_client(agent_name=self.agent_name)
+                        _retry_resp = _retry_client.call(
+                            prompt=f'''A skill script failed with this error:
+{_err_msg[:500]}
+
+The task is: "{topic}"
+The skill's reason: {skill.reason}
+
+Here is the skill's documentation (SKILL.md):
+{_skill_md[:3000]}
+
+Based on the SKILL.md, generate the correct CLI parameters as a JSON object.
+Map the task requirements to the exact parameter names shown in SKILL.md.
+Use only parameters documented in SKILL.md.
+
+Return ONLY a JSON object like {{"param1": "value1", "param2": "value2"}}.
+No explanation, just JSON.''',
+                            max_tokens=500,
+                            session_id=f"retry_params_{self.agent_name}"
+                        )
+                        if _retry_resp:
+                            try:
+                                _new_params = json.loads(_retry_resp.strip())
+                                _new_params.setdefault('format', 'json')
+                                print(f" params={_new_params}",
+                                      end="", flush=True, file=sys.stderr)
+                                result = self.skill_executor.execute_skill(
+                                    skill_name=actual_skill_name,
+                                    skill_metadata=skill_meta,
+                                    parameters=_new_params,
+                                    timeout=_timeout
+                                )
+                            except (json.JSONDecodeError, Exception):
+                                pass
 
                 if result.get('status') == 'success':
                     results["tools_used"].append(actual_skill_name)

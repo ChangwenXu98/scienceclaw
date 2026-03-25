@@ -174,6 +174,36 @@ The agent completed the full pipeline via `scienceclaw-post`:
 - **materials skill returns wrong data:** The materials skill returns ceramic screening by default (Si-C, B-C systems), not the hydride structures requested. It doesn't pass the topic as a query.
 - **Untested:** Whether the agent can reason about "superhydrides" without specifying formulas.
 
+## Phase 6: Remove Special-Casing, Add Generic Retry (2026-03-25)
+
+### Problem
+Lines 325-434 in `deep_investigation.py` contained skill-specific hacks:
+- `params.clear()` for `('code-execution', 'uma', 'structure-enumeration')` only
+- Hardcoded LLM prompt with hydride-specific hints ("Good choices for hydrides: LaH3...")
+- Hardcoded `--structures-dir` default for `uma` only
+- Hardcoded code generation specifically for `code-execution`
+
+This violates the principle: no special processing for specific skills.
+
+### Solution: Generic retry-with-SKILL.md
+When ANY skill fails due to wrong parameters:
+1. Read the skill's `SKILL.md` documentation
+2. Send the error message + SKILL.md to an LLM call
+3. LLM generates correct params based on the docs
+4. Retry once with corrected params
+
+This is fully generic — works for any skill without knowing its name.
+
+### Files changed
+- `autonomous/deep_investigation.py`:
+  - REMOVED: all skill-specific param handling (lines 325-434)
+  - REMOVED: hardcoded timeout for specific skill names
+  - ADDED: generic timeout detection from SKILL.md content (GPU/SLURM keywords → 300s)
+  - ADDED: generic retry mechanism after param errors — reads SKILL.md, asks LLM for correct params, retries once
+
+### Status: NEEDS TESTING
+The retry mechanism is implemented but untested. The previous special-cased code has been fully removed.
+
 ## Open Questions
 
 1. Should the agent be able to call skills multiple times in one investigation? (Iterative execution)
