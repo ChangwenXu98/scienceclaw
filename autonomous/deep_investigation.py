@@ -389,22 +389,29 @@ class DeepInvestigator:
                               end="", flush=True, file=sys.stderr)
                         from core.llm_client import get_llm_client
                         _retry_client = get_llm_client(agent_name=self.agent_name)
+                        # Identify which script was executed
+                        _executables = skill_meta.get('executables', [])
+                        _script_name = Path(_executables[0]).name if _executables else 'unknown'
+
                         _retry_resp = _retry_client.call(
-                            prompt=f'''A skill script failed with this error:
+                            prompt=f'''A skill script "{_script_name}" failed with this error:
 {_err_msg[:500]}
 
 The task is: "{topic}"
 The skill's reason: {skill.reason}
+The parameters that were tried: {json.dumps(params)}
 
 Here is the skill's documentation (SKILL.md):
 {_skill_md[:3000]}
 
-Based on the SKILL.md, generate the correct CLI parameters as a JSON object.
-Map the task requirements to the exact parameter names shown in SKILL.md.
-Use only parameters documented in SKILL.md.
+INSTRUCTIONS:
+1. Find the section in SKILL.md that documents "{_script_name}" specifically
+2. Identify the EXACT parameter names from the Parameters table for that script
+3. Map the task requirements to those exact parameter names
+4. Include all REQUIRED parameters
 
 Return ONLY a JSON object like {{"param1": "value1", "param2": "value2"}}.
-No explanation, just JSON.''',
+No explanation, no markdown, just the JSON object.''',
                             max_tokens=500,
                             session_id=f"retry_params_{self.agent_name}"
                         )
