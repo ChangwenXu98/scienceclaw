@@ -128,3 +128,6 @@ CONTEXT.md
 
 # Results
 hydride_screening*
+uma_screen_output*
+*.err
+*.out
