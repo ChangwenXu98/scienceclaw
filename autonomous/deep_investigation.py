@@ -440,12 +440,35 @@ No explanation, no markdown, just the JSON object.''',
                                 _clean = '\n'.join(
                                     l for l in _clean.split('\n')
                                     if not l.strip().startswith('```'))
-                            # Try to extract JSON from the response
-                            _json_match = re.search(r'\{[^{}]*\}', _clean)
-                            if _json_match:
-                                _clean = _json_match.group(0)
+                            # Try to parse the full response as JSON first
+                            _new_params = None
+                            for _attempt in [_clean, _clean.strip()]:
+                                try:
+                                    _new_params = json.loads(_attempt)
+                                    break
+                                except json.JSONDecodeError:
+                                    pass
+                            # Fallback: extract outermost { ... } allowing nesting
+                            if _new_params is None:
+                                _depth = 0
+                                _start = -1
+                                for _ci, _ch in enumerate(_clean):
+                                    if _ch == '{':
+                                        if _depth == 0:
+                                            _start = _ci
+                                        _depth += 1
+                                    elif _ch == '}':
+                                        _depth -= 1
+                                        if _depth == 0 and _start >= 0:
+                                            try:
+                                                _new_params = json.loads(
+                                                    _clean[_start:_ci + 1])
+                                            except json.JSONDecodeError:
+                                                pass
+                                            break
                             try:
-                                _new_params = json.loads(_clean)
+                                if _new_params is None:
+                                    raise json.JSONDecodeError("no JSON found", "", 0)
                                 _new_params.setdefault('format', 'json')
                                 print(f" params={_new_params}",
                                       end="", flush=True, file=sys.stderr)
