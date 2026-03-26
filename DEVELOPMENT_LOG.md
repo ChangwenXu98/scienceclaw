@@ -325,6 +325,39 @@ All previous results removed. Single `scienceclaw-post` call with "Screen superh
 - `autonomous/deep_investigation.py`: ADDED prior skill output context passing, FIXED nested JSON parsing for `--wyckoff`
 - `core/skill_executor.py`: FIXED strip leading dashes from keys, skip None values, handle boolean flags
 
+## Phase 8: Job Dependency + Clean-State End-to-End (2026-03-26)
+
+### Problem
+Phonon job started before UMA finished (race condition), only finding 6/14 CIFs.
+
+### Fix
+Added `--after-job` parameter to both `uma_screen.py` and `phonon_stability.py`. When auto-submitting to SLURM, passes `--dependency=afterok:<job_id>`. The retry LLM reads this from the SKILL.md and passes the prior UMA job ID via context.
+
+### Files changed
+- `skills/uma/scripts/uma_screen.py`: ADDED `--after-job` argument, sbatch uses `--dependency`
+- `skills/uma/SKILL.md`: documented `--after-job`
+- `skills/phonon/scripts/phonon_stability.py`: ADDED `--after-job` argument, sbatch uses `--dependency`
+- `skills/phonon/SKILL.md`: documented `--after-job`
+
+### Clean-State Full Pipeline Result (2026-03-26)
+
+Single `scienceclaw-post` call, all previous results deleted.
+
+| Skill | Status | LLM-chosen params |
+|-------|--------|-------------------|
+| materials | ✓ | Default MP search |
+| structure-enumeration | ✓ | Wyckoff: LaH10 (SG225), CaH6 (SG229). Metals: Y,Ca,Sc,Ce,La,Ba,Sr → 14 CIFs |
+| uma | ✓ | structures-dir from enumeration output, 0+150 GPa → SLURM job 27020114 |
+| phonon | ✓ | structures-dir from UMA output, **after-job=27020114** → SLURM job 27020115 (PENDING/Dependency) |
+| job-results | ✓ | job_id=27020114, output_dir from UMA |
+
+Jobs completed: UMA 11 min, Phonon 38 min (started automatically after UMA via dependency).
+
+**Results**: 28 structures analyzed. 4 dynamically stable (all at 150 GPa):
+- ScH6 (min_freq=1.87 THz), YH6 (1.72), CeH6 (1.06), CeH10 (0.85)
+
+No race condition. No missing structures. Fully autonomous from "Screen superhydride candidates for superconductivity".
+
 ## Open Questions
 
 1. Should the agent be able to call skills multiple times in one investigation? (Iterative execution)
