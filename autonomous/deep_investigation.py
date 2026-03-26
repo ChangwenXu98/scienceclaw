@@ -421,11 +421,12 @@ class DeepInvestigator:
                                     if _rmd.exists():
                                         _related.append(
                                             f"\n--- {_sd.name} SKILL.md ---\n"
-                                            + _rmd.read_text()[:2000])
+                                            + _rmd.read_text()[:4000])
                             if _related:
                                 _related_docs = (
                                     "\n\nRelated skill documentation "
-                                    "(APIs available for use in code):"
+                                    "(FOLLOW THESE API PATTERNS EXACTLY "
+                                    "in your generated code):"
                                     + "".join(_related[:3]))
 
                         _retry_resp = _retry_client.call(
