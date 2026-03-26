@@ -1,0 +1,90 @@
+{
+  "ScH10": {
+    "is_stable": false,
+    "n_imaginary_modes": 3,
+    "min_frequency": -451.55656304656554,
+    "max_frequency": 455.96356703471565,
+    "mean_frequency": 218.4509247271287,
+    "stability_score": 0.0,
+    "min_distance": 0.033123247771094246,
+    "density": 2339.2035368563415,
+    "n_modes": 30
+  },
+  "LaH10": {
+    "is_stable": false,
+    "n_imaginary_modes": 3,
+    "min_frequency": -292.239627673869,
+    "max_frequency": 436.62753382146883,
+    "mean_frequency": 239.82654207926325,
+    "stability_score": 0.0,
+    "min_distance": 0.03532725357067259,
+    "density": 2337.4926946395717,
+    "n_modes": 30
+  },
+  "CeH6": {
+    "is_stable": false,
+    "n_imaginary_modes": 1,
+    "min_frequency": -434.1748086460601,
+    "max_frequency": 384.36867472686214,
+    "mean_frequency": 247.9189914317493,
+    "stability_score": 0.0,
+    "min_distance": 0.0790349993089144,
+    "density": 838.5146330339322,
+    "n_modes": 18
+  },
+  "YH6": {
+    "is_stable": false,
+    "n_imaginary_modes": 1,
+    "min_frequency": -300.73901245331837,
+    "max_frequency": 572.3695257031137,
+    "mean_frequency": 293.1253165171105,
+    "stability_score": 0.0,
+    "min_distance": 0.08168964182957408,
+    "density": 837.8672359999198,
+    "n_modes": 18
+  },
+  "CeH10": {
+    "is_stable": false,
+    "n_imaginary_modes": 3,
+    "min_frequency": -503.35108620700873,
+    "max_frequency": 566.4007948501842,
+    "mean_frequency": 246.34798021546536,
+    "stability_score": 0.0,
+    "min_distance": 0.03373902640428589,
+    "density": 2333.8926343372627,
+    "n_modes": 30
+  },
+  "ScH6": {
+    "is_stable": false,
+    "n_imaginary_modes": 1,
+    "min_frequency": -44.42018773871516,
+    "max_frequency": 488.66931811454174,
+    "mean_frequency": 282.7086552601615,
+    "stability_score": 0.0,
+    "min_distance": 0.08068718995511555,
+    "density": 839.2144024330086,
+    "n_modes": 18
+  },
+  "YH10": {
+    "is_stable": false,
+    "n_imaginary_modes": 3,
+    "min_frequency": -524.9965328765734,
+    "max_frequency": 584.021339060544,
+    "mean_frequency": 253.6458219752318,
+    "stability_score": 0.0,
+    "min_distance": 0.03402250134203686,
+    "density": 2339.7283907722267,
+    "n_modes": 30
+  },
+  "CaH6": {
+    "is_stable": false,
+    "n_imaginary_modes": 1,
+    "min_frequency": -404.3115825734663,
+    "max_frequency": 429.1023115270665,
+    "mean_frequency": 241.38289417106145,
+    "stability_score": 0.0,
+    "min_distance": 0.08045239396755513,
+    "density": 837.0941381286774,
+    "n_modes": 18
+  }
+}

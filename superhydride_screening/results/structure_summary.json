@@ -1,0 +1,30 @@
+{
+  "total_structures": 9,
+  "structure_types": [
+    "LaH10",
+    "YH10",
+    "CaH10",
+    "ScH10",
+    "CeH10",
+    "CaH6",
+    "YH6",
+    "ScH6",
+    "CeH6"
+  ],
+  "base_structures": [
+    "LaH10",
+    "CaH6"
+  ],
+  "substitution_elements": [
+    "Y",
+    "Ca",
+    "Sc",
+    "Ce"
+  ],
+  "pressure": "150 GPa",
+  "next_steps": [
+    "UMA relaxation",
+    "phonon calculations",
+    "stability analysis"
+  ]
+}

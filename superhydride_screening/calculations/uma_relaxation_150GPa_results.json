@@ -1,0 +1,90 @@
+{
+  "LaH10": {
+    "converged": true,
+    "initial_volume": 42.87500000000001,
+    "final_volume": 0.004705897060224241,
+    "compression_percent": 99.98902414679831,
+    "initial_density": 0.25655976676384834,
+    "final_density": 2337.4926946395717,
+    "final_energy": -21.997817009316925,
+    "max_force": 0.024225657057667424,
+    "natoms": 11
+  },
+  "YH10": {
+    "converged": true,
+    "initial_volume": 42.87500000000001,
+    "final_volume": 0.004701400403304698,
+    "compression_percent": 99.98903463462786,
+    "initial_density": 0.25655976676384834,
+    "final_density": 2339.7283907722267,
+    "final_energy": -21.998023890502893,
+    "max_force": 0.03572024816416117,
+    "natoms": 11
+  },
+  "ScH10": {
+    "converged": true,
+    "initial_volume": 42.87500000000001,
+    "final_volume": 0.00470245527021685,
+    "compression_percent": 99.98903217429687,
+    "initial_density": 0.25655976676384834,
+    "final_density": 2339.2035368563415,
+    "final_energy": -21.998085859045645,
+    "max_force": 0.02222201969729506,
+    "natoms": 11
+  },
+  "CeH10": {
+    "converged": true,
+    "initial_volume": 42.87500000000001,
+    "final_volume": 0.004713155968772138,
+    "compression_percent": 99.98900721639936,
+    "initial_density": 0.25655976676384834,
+    "final_density": 2333.8926343372627,
+    "final_energy": -21.997790361612775,
+    "max_force": 0.022580858306566923,
+    "natoms": 11
+  },
+  "CaH6": {
+    "converged": true,
+    "initial_volume": 32.767999999999994,
+    "final_volume": 0.00836226140066933,
+    "compression_percent": 99.97448040344034,
+    "initial_density": 0.21362304687500006,
+    "final_density": 837.0941381286774,
+    "final_energy": -13.997668421510692,
+    "max_force": 0.02858703406880952,
+    "natoms": 7
+  },
+  "YH6": {
+    "converged": true,
+    "initial_volume": 32.767999999999994,
+    "final_volume": 0.008354545564305453,
+    "compression_percent": 99.97450395030425,
+    "initial_density": 0.21362304687500006,
+    "final_density": 837.8672359999198,
+    "final_energy": -13.997680137202936,
+    "max_force": 0.030212999507783677,
+    "natoms": 7
+  },
+  "ScH6": {
+    "converged": true,
+    "initial_volume": 32.767999999999994,
+    "final_volume": 0.008341134255687162,
+    "compression_percent": 99.9745448783701,
+    "initial_density": 0.21362304687500006,
+    "final_density": 839.2144024330086,
+    "final_energy": -13.997825205923927,
+    "max_force": 0.030006075857507957,
+    "natoms": 7
+  },
+  "CeH6": {
+    "converged": true,
+    "initial_volume": 32.767999999999994,
+    "final_volume": 0.008348095220082737,
+    "compression_percent": 99.97452363519261,
+    "initial_density": 0.21362304687500006,
+    "final_density": 838.5146330339322,
+    "final_energy": -13.997929034721441,
+    "max_force": 0.02530771322058044,
+    "natoms": 7
+  }
+}
