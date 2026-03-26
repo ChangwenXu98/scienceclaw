@@ -531,32 +531,37 @@ No explanation, no markdown outside the JSON.''',
 
                 # ── Runtime error correction: if code-execution ran but the
                 # code itself failed (ImportError, etc.), feed the error back
-                # to the LLM with SKILL.md and retry with corrected code. ──
-                if (result.get('status') == 'success'
-                    and _script_name == 'run_code.py'):
+                # to the LLM with SKILL.md and retry with corrected code.
+                # Up to 2 correction rounds. ──
+                _fix_round = 0
+                while (result.get('status') == 'success'
+                       and _script_name == 'run_code.py'
+                       and _fix_round < 2):
                     _code_result = result.get('result', {})
                     _code_stderr = _code_result.get('stderr', '')
                     _code_rc = _code_result.get('return_code', 0)
-                    if _code_rc != 0 and _code_stderr and _skill_md:
-                        print(f"\n    Code failed (rc={_code_rc}), self-correcting...",
-                              end="", flush=True, file=sys.stderr)
-                        from core.llm_client import get_llm_client
-                        _fix_client = get_llm_client(agent_name=self.agent_name)
+                    if _code_rc == 0 or not _code_stderr or not _skill_md:
+                        break
+                    _fix_round += 1
+                    print(f"\n    Code failed (rc={_code_rc}), self-correcting (round {_fix_round})...",
+                          end="", flush=True, file=sys.stderr)
+                    from core.llm_client import get_llm_client
+                    _fix_client = get_llm_client(agent_name=self.agent_name)
 
-                        # Load related skill docs for API reference
-                        _fix_related = ""
-                        _skills_dir = self.scienceclaw_dir / 'skills'
-                        for _sd in sorted(_skills_dir.iterdir()):
-                            if _sd.is_dir() and _sd.name != 'code-execution':
-                                _rmd = _sd / 'SKILL.md'
-                                if _rmd.exists():
-                                    _fix_related += f"\n--- {_sd.name} ---\n" + _rmd.read_text()[:3000]
-                            if len(_fix_related) > 8000:
-                                break
+                    # Load related skill docs for API reference
+                    _fix_related = ""
+                    _skills_dir = self.scienceclaw_dir / 'skills'
+                    for _sd in sorted(_skills_dir.iterdir()):
+                        if _sd.is_dir() and _sd.name != 'code-execution':
+                            _rmd = _sd / 'SKILL.md'
+                            if _rmd.exists():
+                                _fix_related += f"\n--- {_sd.name} ---\n" + _rmd.read_text()[:3000]
+                        if len(_fix_related) > 8000:
+                            break
 
-                        _fix_code = _new_params.get('code', params.get('code', ''))
-                        _fix_resp = _fix_client.call(
-                            prompt=f'''The Python code you generated failed with this error:
+                    _fix_code = _new_params.get('code', params.get('code', ''))
+                    _fix_resp = _fix_client.call(
+                        prompt=f'''The Python code you generated failed with this error:
 
 {_code_stderr[:1000]}
 
@@ -568,36 +573,30 @@ Here is the code that failed:
 SKILL DOCUMENTATION (use ONLY these API patterns):
 {_fix_related[:6000]}
 
-INSTRUCTIONS:
-1. Fix the error using ONLY the API calls shown in the skill documentation above
-2. Do NOT use APIs from your training data — use EXACTLY what the docs show
-3. Common fixes:
-   - Use `pretrained_mlip.get_predict_unit("uma-m-1p1", device="cuda")` NOT `pretrained_mlip("UMA")`
-   - Use `FrechetCellFilter` from `ase.filters` NOT `ExpCellFilter` from `ase.constraints`
-   - Use `--partition=venkvis-h100` NOT `--partition=gpu`
-   - Use `source {{venv}}/bin/activate` NOT `conda activate`
-4. Use absolute paths or os.environ for working directories
-5. Check GPU with `torch.cuda.is_available()` and submit to SLURM if unavailable
+Fix the error using ONLY the API calls shown in the skill documentation above.
+Do NOT use APIs from your training data — use EXACTLY what the docs show.
+Refer to the "Verification Checklist" section in the UMA SKILL.md.
 
 Output ONLY the corrected Python code. No markdown fences, no explanations.''',
-                            max_tokens=4096,
-                            session_id=f"code_fix_{self.agent_name}"
-                        )
-                        if _fix_resp:
-                            _fixed_code = _fix_resp.strip()
-                            if _fixed_code.startswith('```'):
-                                _fixed_code = '\n'.join(
-                                    l for l in _fixed_code.split('\n')
-                                    if not l.strip().startswith('```'))
-                            if 'import ' in _fixed_code:
-                                print(f" fixed ({len(_fixed_code)} chars)",
-                                      end="", flush=True, file=sys.stderr)
-                                result = self.skill_executor.execute_skill(
-                                    skill_name=actual_skill_name,
-                                    skill_metadata=skill_meta,
-                                    parameters={'code': _fixed_code, 'format': 'json'},
-                                    timeout=_timeout
-                                )
+                        max_tokens=4096,
+                        session_id=f"code_fix_{self.agent_name}"
+                    )
+                    if _fix_resp:
+                        _fixed_code = _fix_resp.strip()
+                        if _fixed_code.startswith('```'):
+                            _fixed_code = '\n'.join(
+                                l for l in _fixed_code.split('\n')
+                                if not l.strip().startswith('```'))
+                        if 'import ' in _fixed_code:
+                            print(f" fixed ({len(_fixed_code)} chars)",
+                                  end="", flush=True, file=sys.stderr)
+                            _new_params = {'code': _fixed_code, 'format': 'json'}
+                            result = self.skill_executor.execute_skill(
+                                skill_name=actual_skill_name,
+                                skill_metadata=skill_meta,
+                                parameters=_new_params,
+                                timeout=_timeout
+                            )
 
                 if result.get('status') == 'success':
                     results["tools_used"].append(actual_skill_name)
