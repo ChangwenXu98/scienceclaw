@@ -1,0 +1,21 @@
+# UMA calculation for CeH10 at 150 GPa
+structure_file = structures/CeH10_POSCAR
+output_dir = relaxed/CeH10
+
+# Calculation settings
+calc_type = relax
+pressure = 150  # GPa
+max_steps = 500
+force_convergence = 0.01  # eV/Angstrom
+stress_convergence = 0.1  # GPa
+
+# Electronic structure
+xc_functional = PBE
+k_points_density = 0.3  # per Angstrom^-1
+energy_cutoff = 800  # eV
+smearing = 0.1  # eV
+
+# High pressure settings
+bulk_modulus_estimate = 200  # GPa
+optimize_cell = true
+optimize_positions = true
