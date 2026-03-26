@@ -50,6 +50,7 @@ python3 {baseDir}/scripts/phonon_stability.py \
 |-----------|-------------|
 | `--structure` | Path to a single CIF/POSCAR file |
 | `--structures-dir` | Directory of CIF files to analyze |
+| `--after-job` | SLURM job ID to wait for before starting (e.g. wait for UMA screening to finish) |
 | `--supercell` | Supercell dimensions (default: auto, typically 2,2,2) |
 | `--displacement` | Finite displacement distance in Angstrom (default: 0.01) |
 | `--model` | UMA checkpoint (default: `uma-m-1p1`) |

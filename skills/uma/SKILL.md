@@ -141,6 +141,7 @@ If no GPU is available, the script auto-submits to SLURM (`venkvis-h100`).
 |-----------|-------------|
 | `--structures-dir` | Directory of CIF files to relax (default: `~/.scienceclaw/enumerated_structures`) |
 | `--pressures` | Pressures in GPa (default: `0,150`) |
+| `--after-job` | SLURM job ID to wait for before starting (ensures prior job completes first) |
 | `--model` | UMA checkpoint (default: `uma-m-1p1`) |
 | `--device` | `cuda` (default) or `cpu` |
 | `--fmax` | Force convergence threshold (default: `0.05`) |

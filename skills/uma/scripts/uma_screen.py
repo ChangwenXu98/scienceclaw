@@ -345,7 +345,12 @@ export HF_TOKEN="{os.environ.get('HF_TOKEN', '')}"
     submit_path.write_text(slurm_script)
     submit_path.chmod(0o755)
 
-    result = subprocess.run(["sbatch", str(submit_path)], capture_output=True, text=True)
+    sbatch_cmd = ["sbatch"]
+    if args.after_job:
+        sbatch_cmd.extend(["--dependency", f"afterok:{args.after_job}"])
+    sbatch_cmd.append(str(submit_path))
+
+    result = subprocess.run(sbatch_cmd, capture_output=True, text=True)
     if result.returncode != 0:
         print(json.dumps({"status": "error", "error": result.stderr.strip()}))
         sys.exit(1)
@@ -360,6 +365,7 @@ export HF_TOKEN="{os.environ.get('HF_TOKEN', '')}"
         "job_id": job_id,
         "output_dir": str(out_dir),
         "structures_dir": str(args.structures_dir),
+        "after_job": args.after_job,
         "note": f"Check: squeue -j {job_id}. Results: cat {out_dir}/slurm-{job_id}.out",
     }, indent=2))
 
@@ -378,6 +384,9 @@ def main():
     parser.add_argument("--fmax", type=float, default=0.05)
     parser.add_argument("--steps", type=int, default=200)
     parser.add_argument("--output-dir", default="./uma_screen_output")
+    parser.add_argument("--after-job", default=None,
+                        help="SLURM job ID to wait for before starting "
+                             "(adds --dependency=afterok:<id>)")
     parser.add_argument("--format", default="json", choices=["json", "summary"])
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
