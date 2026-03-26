@@ -496,11 +496,21 @@ No explanation, no markdown outside the JSON.''',
                             # raw Python code instead of JSON, wrap it
                             if _new_params is None and _script_name == 'run_code.py':
                                 _code_text = _clean.strip()
-                                if _code_text and ('import ' in _code_text
-                                                   or 'def ' in _code_text
-                                                   or 'print(' in _code_text):
+                                # Check if it's a JSON-wrapped code string
+                                if _code_text.startswith('{"code"'):
+                                    try:
+                                        _new_params = json.loads(_code_text)
+                                    except json.JSONDecodeError:
+                                        pass
+                                # Otherwise wrap raw Python as code param
+                                if _new_params is None and _code_text and (
+                                    'import ' in _code_text
+                                    or 'def ' in _code_text
+                                    or 'print(' in _code_text
+                                ):
                                     _new_params = {'code': _code_text, 'format': 'json'}
-                                    print(f" (wrapped raw code, {len(_code_text)} chars)",
+                                if _new_params and 'code' in _new_params:
+                                    print(f" (code: {len(_new_params['code'])} chars)",
                                           end="", flush=True, file=sys.stderr)
 
                             try:
