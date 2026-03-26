@@ -492,6 +492,17 @@ No explanation, no markdown outside the JSON.''',
                                             except json.JSONDecodeError:
                                                 pass
                                             break
+                            # Fallback for code-execution: if LLM returned
+                            # raw Python code instead of JSON, wrap it
+                            if _new_params is None and _script_name == 'run_code.py':
+                                _code_text = _clean.strip()
+                                if _code_text and ('import ' in _code_text
+                                                   or 'def ' in _code_text
+                                                   or 'print(' in _code_text):
+                                    _new_params = {'code': _code_text, 'format': 'json'}
+                                    print(f" (wrapped raw code, {len(_code_text)} chars)",
+                                          end="", flush=True, file=sys.stderr)
+
                             try:
                                 if _new_params is None:
                                     raise json.JSONDecodeError("no JSON found", "", 0)
