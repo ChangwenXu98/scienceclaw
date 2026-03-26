@@ -131,3 +131,6 @@ hydride_screening*
 uma_screen_output*
 *.err
 *.out
+
+# Bash files
+*.sh
