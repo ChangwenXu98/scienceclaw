@@ -305,8 +305,25 @@ The agent autonomously decided prototypes and metals from just "superhydrides". 
   - FIXED: skip `None` values instead of passing `--key None`
   - FIXED: boolean `True` → flag only, `False` → skip
 
-### Phonon job running
-Job 27019309 running on H100, analyzing 36 relaxed structures from UMA screening. Early results show dynamically unstable candidates (imaginary frequencies).
+### Clean-State Full Pipeline Test (2026-03-25, FINAL)
+
+All previous results removed. Single `scienceclaw-post` call with "Screen superhydride candidates for superconductivity".
+
+| Skill | Status | What the LLM decided |
+|-------|--------|---------------------|
+| structure-enumeration | ✓ | Built LaH10 (SG 225) + CaH6 (SG 229) from Wyckoff positions. Metals: Y,Ca,Sc,Ce,La,Ba,Sr. 14 CIFs generated. |
+| materials | ✓ | Searched MP |
+| uma | ✓ | Read enumerated dir from prior context, submitted SLURM at 150 GPa |
+| phonon | ✓ | Read UMA output dir from prior context, submitted SLURM |
+| job-results | ✓ | Read job ID from prior context |
+
+**Key achievement**: The agent built LaH10 and CaH6 from Wyckoff positions (not from MP), chose 7 metals for substitution, and chained all 5 skills — all autonomously from a clean state.
+
+### Files changed in this phase
+- `skills/structure-enumeration/scripts/enumerate_structures.py`: ADDED `--wyckoff` option for building from spacegroup + Wyckoff positions
+- `skills/structure-enumeration/SKILL.md`: ADDED Wyckoff spec format docs, common superhydride prototype table
+- `autonomous/deep_investigation.py`: ADDED prior skill output context passing, FIXED nested JSON parsing for `--wyckoff`
+- `core/skill_executor.py`: FIXED strip leading dashes from keys, skip None values, handle boolean flags
 
 ## Open Questions
 
