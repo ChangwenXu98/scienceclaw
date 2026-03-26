@@ -409,6 +409,25 @@ class DeepInvestigator:
                                 "file paths, directories, etc.):\n"
                                 + "\n".join(_prior_lines))
 
+                        # For code-execution, also include other skills' docs
+                        # so the LLM knows the APIs it can use in generated code
+                        _related_docs = ""
+                        if _script_name == "run_code.py":
+                            _skills_dir = self.scienceclaw_dir / 'skills'
+                            _related = []
+                            for _sd in sorted(_skills_dir.iterdir()):
+                                if _sd.is_dir() and _sd.name != 'code-execution':
+                                    _rmd = _sd / 'SKILL.md'
+                                    if _rmd.exists():
+                                        _related.append(
+                                            f"\n--- {_sd.name} SKILL.md ---\n"
+                                            + _rmd.read_text()[:2000])
+                            if _related:
+                                _related_docs = (
+                                    "\n\nRelated skill documentation "
+                                    "(APIs available for use in code):"
+                                    + "".join(_related[:3]))
+
                         _retry_resp = _retry_client.call(
                             prompt=f'''A skill script "{_script_name}" failed with this error:
 {_err_msg[:500]}
@@ -420,6 +439,7 @@ The parameters that were tried: {json.dumps(params)}
 
 Here is the skill's documentation (SKILL.md):
 {_skill_md[:3000]}
+{_related_docs}
 
 INSTRUCTIONS:
 1. Find the section in SKILL.md that documents "{_script_name}" specifically
@@ -428,9 +448,14 @@ INSTRUCTIONS:
 4. Include all REQUIRED parameters
 5. If prior skills produced output directories or file paths, use those as input paths for this skill
 
-Return ONLY a JSON object like {{"param1": "value1", "param2": "value2"}}.
-No explanation, no markdown, just the JSON object.''',
-                            max_tokens=500,
+If the script accepts a --code parameter, generate the COMPLETE Python code
+that performs the task, and return it as: {{"code": "<your python code here>"}}
+The code should print JSON results to stdout and status to stderr.
+If the code needs GPU and none is available, it should write a SLURM script and submit via sbatch.
+
+Otherwise return a JSON object like {{"param1": "value1", "param2": "value2"}}.
+No explanation, no markdown outside the JSON.''',
+                            max_tokens=4096,
                             session_id=f"retry_params_{self.agent_name}"
                         )
                         if _retry_resp:

@@ -49,14 +49,17 @@ python3 {baseDir}/scripts/run_code.py \
 
 ## Available Libraries
 
-The following libraries are available in the Python environment:
-
 - **pymatgen** — Crystal structure generation, spacegroup operations, phase diagrams, MP API
 - **ase** — Atomic simulation environment, structure I/O, optimizers, filters
 - **fairchem-core** — UMA model loading and inference (`pretrained_mlip`, `FAIRChemCalculator`)
+- **phonopy** — Phonon calculations via finite displacement method
 - **mp-api** — Materials Project REST client
 - **numpy**, **scipy** — Numerical computing
-- **json**, **os**, **sys**, **pathlib** — Standard library
+- **json**, **os**, **sys**, **pathlib**, **subprocess** — Standard library
+
+**IMPORTANT**: See the `uma` skill's SKILL.md for detailed Python API examples
+covering structure relaxation, phonon calculation, structure generation,
+convex hull analysis, and SLURM GPU submission patterns.
 
 ## Example Workflows
 
