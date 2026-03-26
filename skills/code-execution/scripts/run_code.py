@@ -47,6 +47,9 @@ def main():
         tmp.write(code)
         tmp_path = tmp.name
 
+    # Execute in the scienceclaw project directory (not /tmp)
+    _cwd = str(Path(__file__).resolve().parent.parent.parent)
+
     start = time.time()
     try:
         result = subprocess.run(
@@ -54,6 +57,7 @@ def main():
             capture_output=True,
             text=True,
             timeout=args.timeout,
+            cwd=_cwd,
             env={**__import__("os").environ},
         )
         elapsed = time.time() - start

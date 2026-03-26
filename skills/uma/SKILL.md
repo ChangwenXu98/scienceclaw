@@ -221,6 +221,20 @@ For job dependency (ensure job B runs after job A):
 sbatch --dependency=afterok:<job_A_id> submit_B.sh
 ```
 
+## Verification Checklist
+
+Before submitting or executing code that uses UMA, verify:
+
+- [ ] Model loaded with `pretrained_mlip.get_predict_unit("uma-m-1p1", device="cuda")` — NOT `pretrained_mlip("UMA")` or `pretrained_mlip.load()`
+- [ ] Calculator created with `FAIRChemCalculator(predictor, task_name="omat")` — NOT `FAIRChemCalculator(model)`
+- [ ] Cell filter is `FrechetCellFilter` from `ase.filters` — NOT `ExpCellFilter` from `ase.constraints`
+- [ ] Pressure conversion: `pressure_gpa / 160.21766208` — NOT `* 0.0006242` or other approximations
+- [ ] SLURM partition is `venkvis-h100` or `venkvis-a100` — NOT `gpu` or `standard`
+- [ ] Environment activation: `source <venv>/bin/activate` — NOT `conda activate` or `module load`
+- [ ] Venv path from `os.environ.get("VIRTUAL_ENV", "")` — NOT hardcoded
+- [ ] API keys from `os.environ.get("HF_TOKEN")` and `os.environ.get("MP_API_KEY")`
+- [ ] Output printed as JSON to stdout, progress/errors to stderr
+
 ## Models
 
 | Model | Parameters | Speed | Accuracy |
