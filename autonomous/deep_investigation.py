@@ -200,6 +200,205 @@ class DeepInvestigator:
                     return smiles
         return None
 
+    def _run_agentic_computation(self, topic: str, reason: str,
+                                 prior_outputs: list,
+                                 max_steps: int = 20) -> Dict:
+        """Run an agentic computation loop for the code-execution skill.
+
+        The LLM iteratively writes files, runs commands, reads output,
+        and decides what to do next — like a researcher at a terminal.
+        """
+        import subprocess as _sp
+
+        # Collect all skill docs for context
+        skill_docs = ""
+        skills_dir = self.scienceclaw_dir / 'skills'
+        for sd in sorted(skills_dir.iterdir()):
+            if sd.is_dir():
+                md = sd / 'SKILL.md'
+                if md.exists():
+                    skill_docs += f"\n\n=== {sd.name} ===\n" + md.read_text()[:4000]
+            if len(skill_docs) > 15000:
+                break
+
+        # Prior context
+        prior_context = ""
+        if prior_outputs:
+            prior_context = "\n\nPrior skill outputs:\n"
+            for po in prior_outputs[-3:]:
+                prior_context += f"- {po['skill']}: {json.dumps(po['output'], default=str)[:500]}\n"
+
+        # Working directory
+        work_dir = self.scienceclaw_dir
+        # Track conversation history for the loop
+        history = []
+        all_actions = []
+
+        system_prompt = f"""You are a computational materials scientist working at a terminal.
+Your task: {topic}
+Reason: {reason}
+
+You have access to these actions (respond with ONE JSON action per turn):
+
+1. Write a file:
+   {{"action": "write_file", "path": "path/to/file.py", "content": "file content..."}}
+
+2. Run a shell command:
+   {{"action": "run_command", "command": "python3 script.py"}}
+
+3. Read a file:
+   {{"action": "read_file", "path": "path/to/file.txt"}}
+
+4. Finish and report results:
+   {{"action": "done", "result": {{"status": "completed", "findings": [...]}}}}
+
+AVAILABLE SKILL DOCUMENTATION (use these API patterns):
+{skill_docs}
+{prior_context}
+
+IMPORTANT RULES:
+- Respond with ONLY a single JSON action. No explanation outside the JSON.
+- Work step by step: write a script, run it, check output, fix if needed.
+- For GPU work (UMA/fairchem): write a self-contained .py file, then write a
+  SLURM .sh file, then run "sbatch file.sh" to submit.
+- Use the EXACT API patterns from the skill documentation above.
+- Use os.environ for VIRTUAL_ENV, HF_TOKEN, MP_API_KEY in scripts.
+- After submitting SLURM jobs, check status with "squeue -u $USER" or
+  "sacct -j <job_id> --format=JobID,State,Elapsed --noheader".
+- When done, use the "done" action with a summary of results.
+"""
+
+        from core.llm_client import get_llm_client
+        client = get_llm_client(agent_name=self.agent_name)
+
+        for step in range(max_steps):
+            # Build conversation for this turn
+            if not history:
+                prompt = system_prompt + "\n\nBegin. What is your first action?"
+            else:
+                prompt = system_prompt + "\n\nConversation so far:\n"
+                for h in history[-10:]:  # last 10 turns for context
+                    prompt += f"\nYou: {h['action_json']}\nResult: {h['result'][:1000]}\n"
+                prompt += "\nWhat is your next action?"
+
+            response = client.call(
+                prompt=prompt,
+                max_tokens=4096,
+                session_id=f"agentic_comp_{self.agent_name}"
+            )
+
+            if not response:
+                break
+
+            # Parse action from response
+            response = response.strip()
+            # Strip markdown fences
+            if response.startswith('```'):
+                response = '\n'.join(
+                    l for l in response.split('\n')
+                    if not l.strip().startswith('```'))
+
+            # Extract JSON
+            action = None
+            try:
+                action = json.loads(response)
+            except json.JSONDecodeError:
+                # Try to find JSON in the response
+                import re
+                _m = re.search(r'\{.*\}', response, re.DOTALL)
+                if _m:
+                    try:
+                        action = json.loads(_m.group(0))
+                    except json.JSONDecodeError:
+                        pass
+
+            if not action or 'action' not in action:
+                history.append({
+                    'action_json': response[:200],
+                    'result': 'ERROR: Could not parse action. Respond with a single JSON object.'
+                })
+                continue
+
+            action_type = action['action']
+            print(f"\n    [{step+1}/{max_steps}] {action_type}", end="",
+                  flush=True, file=sys.stderr)
+
+            if action_type == 'done':
+                all_actions.append(action)
+                result_data = action.get('result', {})
+                print(f" — computation complete", file=sys.stderr)
+                return {
+                    'status': 'success',
+                    'result': result_data,
+                    'steps_taken': step + 1,
+                    'actions': all_actions,
+                }
+
+            elif action_type == 'write_file':
+                fpath = Path(work_dir) / action.get('path', 'output.txt')
+                fpath.parent.mkdir(parents=True, exist_ok=True)
+                fpath.write_text(action.get('content', ''))
+                result_text = f"Written {fpath} ({len(action.get('content', ''))} chars)"
+                print(f": {fpath.name}", end="", flush=True, file=sys.stderr)
+
+            elif action_type == 'run_command':
+                cmd = action.get('command', '')
+                print(f": {cmd[:60]}", end="", flush=True, file=sys.stderr)
+                try:
+                    proc = _sp.run(
+                        cmd, shell=True, capture_output=True, text=True,
+                        timeout=300, cwd=str(work_dir),
+                        env={**os.environ},
+                    )
+                    result_text = ""
+                    if proc.stdout:
+                        result_text += f"STDOUT:\n{proc.stdout[-2000:]}\n"
+                    if proc.stderr:
+                        result_text += f"STDERR:\n{proc.stderr[-1000:]}\n"
+                    result_text += f"EXIT CODE: {proc.returncode}"
+                    if proc.returncode == 0:
+                        print(f" ✓", end="", flush=True, file=sys.stderr)
+                    else:
+                        print(f" ✗ (rc={proc.returncode})", end="",
+                              flush=True, file=sys.stderr)
+                except _sp.TimeoutExpired:
+                    result_text = "ERROR: Command timed out after 300s"
+                    print(f" ✗ timeout", end="", flush=True, file=sys.stderr)
+                except Exception as e:
+                    result_text = f"ERROR: {e}"
+
+            elif action_type == 'read_file':
+                fpath = Path(work_dir) / action.get('path', '')
+                if fpath.exists():
+                    content = fpath.read_text()
+                    result_text = content[-3000:]  # last 3000 chars
+                    print(f": {fpath.name} ({len(content)} chars)", end="",
+                          flush=True, file=sys.stderr)
+                else:
+                    result_text = f"ERROR: File not found: {fpath}"
+                    print(f" ✗ not found", end="", flush=True, file=sys.stderr)
+
+            else:
+                result_text = f"ERROR: Unknown action '{action_type}'"
+
+            all_actions.append(action)
+            history.append({
+                'action_json': json.dumps(action)[:500],
+                'result': result_text,
+            })
+
+        # Max steps reached
+        print(f"\n    Max steps ({max_steps}) reached", file=sys.stderr)
+        return {
+            'status': 'success',
+            'result': {
+                'status': 'max_steps_reached',
+                'steps_taken': max_steps,
+                'actions': all_actions,
+                'last_results': history[-3:] if history else [],
+            },
+        }
+
     def run_tool_chain(self, topic: str, pre_selected_skills: List[Dict[str, Any]],
                        skill_query_overrides: Optional[Dict[str, str]] = None) -> Dict:
         """
@@ -325,9 +524,28 @@ class DeepInvestigator:
                     # calls; overriding them all with the same topic string is what caused
                     # every pubmed call to execute the identical query.
 
-                # No skill-specific parameter handling. If the LLM selector
-                # provides wrong params, the generic retry-with-SKILL.md
-                # mechanism (after execution) will correct them.
+                # ── Agentic computation loop for code-execution ──
+                # Instead of calling a script once, give the LLM an
+                # interactive loop where it can write files, run commands,
+                # read output, and iterate until done.
+                if _skill_base == 'code-execution':
+                    result = self._run_agentic_computation(
+                        topic=topic,
+                        reason=skill.reason,
+                        prior_outputs=_prior_skill_outputs,
+                    )
+                    if result.get('status') == 'success':
+                        results["tools_used"].append(actual_skill_name)
+                        _prior_skill_outputs.append({
+                            "skill": actual_skill_name,
+                            "output": result.get('result', {}),
+                        })
+                        skill_result = result.get('result', {})
+                        # Skip normal skill execution flow
+                        print(f" ✓", flush=True)
+                    else:
+                        print(f" ✗ {result.get('error', 'unknown error')[:80]}", flush=True)
+                    continue
 
                 # Skills that require --smiles instead of a query string
                 _SMILES_SKILLS = {'askcos', 'rdkit', 'datamol', 'molfeat'}
