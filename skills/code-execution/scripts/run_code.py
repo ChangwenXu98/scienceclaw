@@ -40,12 +40,12 @@ def main():
     else:
         code = args.code
 
-    # Write code to a temp file and execute
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".py", delete=False, dir="/tmp"
-    ) as tmp:
-        tmp.write(code)
-        tmp_path = tmp.name
+    # Save code to a persistent location (needed for SLURM self-submission)
+    _cwd = str(Path(__file__).resolve().parent.parent.parent)
+    _scripts_dir = Path(_cwd) / "agent_scripts"
+    _scripts_dir.mkdir(exist_ok=True)
+    tmp_path = str(_scripts_dir / "agent_code.py")
+    Path(tmp_path).write_text(code)
 
     # Execute in the scienceclaw project directory (not /tmp)
     _cwd = str(Path(__file__).resolve().parent.parent.parent)
@@ -79,7 +79,7 @@ def main():
             "execution_time_s": round(elapsed, 2),
         }
     finally:
-        Path(tmp_path).unlink(missing_ok=True)
+        pass  # Keep the script file for SLURM self-submission
 
     if args.format == "json":
         print(json.dumps(output, indent=2))

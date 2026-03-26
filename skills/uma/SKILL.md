@@ -190,14 +190,19 @@ e_above_hull = pd.get_e_above_hull(my_entry)  # eV/atom; 0 = on hull
 
 ## GPU and SLURM
 
-UMA requires a GPU. If no GPU is available, write a SLURM script and submit:
+UMA requires a GPU. Structure your code with a GPU check at the top. When no GPU
+is available, write a SLURM script that re-runs the SAME script on a GPU node.
+The script file is at `agent_scripts/agent_code.py` relative to the project root.
 
 ```python
-import torch, subprocess, os, sys
+import torch, subprocess, os, sys, json
 
+# GPU check — must be at the TOP of the script, before any UMA imports
 if not torch.cuda.is_available():
+    print("No GPU — submitting to SLURM", file=sys.stderr)
     venv = os.environ.get("VIRTUAL_ENV", "")
-    script = f"""#!/bin/bash
+    script_path = os.path.abspath(sys.argv[0])  # path to this script
+    slurm = f"""#!/bin/bash
 #SBATCH --partition=venkvis-h100
 #SBATCH --gres=gpu:1
 #SBATCH --mem=64G
@@ -207,13 +212,19 @@ if not torch.cuda.is_available():
 source {venv}/bin/activate
 export HF_TOKEN="{os.environ.get('HF_TOKEN', '')}"
 export MP_API_KEY="{os.environ.get('MP_API_KEY', '')}"
-{sys.executable} {__file__}
+cd {os.getcwd()}
+{sys.executable} {script_path}
 """
     with open("submit.sh", "w") as f:
-        f.write(script)
+        f.write(slurm)
     result = subprocess.run(["sbatch", "submit.sh"], capture_output=True, text=True)
-    print(result.stdout)
+    job_id = result.stdout.strip().split()[-1] if result.returncode == 0 else None
+    print(json.dumps({"status": "SUBMITTED_TO_SLURM", "job_id": job_id}))
     sys.exit(0)
+
+# === GPU code below (only runs on GPU node) ===
+from fairchem.core import pretrained_mlip, FAIRChemCalculator
+# ... rest of computation
 ```
 
 For job dependency (ensure job B runs after job A):
