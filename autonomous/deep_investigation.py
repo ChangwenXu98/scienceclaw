@@ -347,7 +347,7 @@ IMPORTANT RULES:
                 try:
                     proc = _sp.run(
                         cmd, shell=True, capture_output=True, text=True,
-                        timeout=300, cwd=str(work_dir),
+                        timeout=600, cwd=str(work_dir),
                         env={**os.environ},
                     )
                     result_text = ""
@@ -533,6 +533,7 @@ IMPORTANT RULES:
                         topic=topic,
                         reason=skill.reason,
                         prior_outputs=_prior_skill_outputs,
+                        max_steps=50,
                     )
                     if result.get('status') == 'success':
                         results["tools_used"].append(actual_skill_name)
